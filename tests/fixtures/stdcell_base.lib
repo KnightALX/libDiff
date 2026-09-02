@@ -1,0 +1,88 @@
+library (stdcell_base) {
+  delay_model : table_lookup;
+  time_unit : "1ns";
+  voltage_unit : "1V";
+  capacitive_load_unit (1,pf);
+  leakage_power_unit : "1nW";
+  lu_table_template (delay_2x2) {
+    variable_1 : input_net_transition;
+    variable_2 : total_output_net_capacitance;
+    index_1 ("0.1, 0.5");
+    index_2 ("0.01, 0.1");
+  }
+  cell (INVX1) {
+    area : 1.0;
+    cell_leakage_power : 0.5;
+    leakage_power () {
+      value : 0.4;
+      when : "A";
+    }
+    leakage_power () {
+      value : 0.6;
+      when : "!A";
+    }
+    pin (A) {
+      direction : input;
+      capacitance : 0.01;
+    }
+    pin (Y) {
+      direction : output;
+      function : "!A";
+      timing () {
+        related_pin : "A";
+        timing_sense : negative_unate;
+        cell_rise (delay_2x2) {
+          index_1 ("0.1, 0.5");
+          index_2 ("0.01, 0.1");
+          values ("0.10, 0.20", "0.15, 0.25");
+        }
+        cell_fall (delay_2x2) {
+          index_1 ("0.1, 0.5");
+          index_2 ("0.01, 0.1");
+          values ("0.11, 0.21", "0.16, 0.26");
+        }
+        rise_transition (delay_2x2) {
+          index_1 ("0.1, 0.5");
+          index_2 ("0.01, 0.1");
+          values ("0.05, 0.08", "0.06, 0.09");
+        }
+        fall_transition (delay_2x2) {
+          index_1 ("0.1, 0.5");
+          index_2 ("0.01, 0.1");
+          values ("0.05, 0.08", "0.06, 0.09");
+        }
+      }
+    }
+  }
+  cell (INVX2) {
+    area : 2.0;
+    pin (A) { direction : input; capacitance : 0.02; }
+    pin (Y) {
+      direction : output;
+      function : "!A";
+      timing () {
+        related_pin : "A";
+        timing_sense : negative_unate;
+        cell_rise (delay_2x2) {
+          values ("0.08, 0.16", "0.12, 0.20");
+        }
+      }
+    }
+  }
+  cell (NOR2X1) {
+    area : 1.5;
+    pin (A) { direction : input; }
+    pin (B) { direction : input; }
+    pin (Y) {
+      direction : output;
+      function : "!(A|B)";
+      timing () {
+        related_pin : "A";
+        timing_sense : negative_unate;
+        cell_rise (delay_2x2) {
+          values ("0.12, 0.22", "0.18, 0.28");
+        }
+      }
+    }
+  }
+}

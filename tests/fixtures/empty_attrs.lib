@@ -1,0 +1,12 @@
+library (empty_attrs) {
+  time_unit : "1ns";
+  cell (EMPTY1) {
+    pin (A) { direction : input; }
+    pin (Y) { direction : output; function : "A"; }
+  }
+  cell (PARTIAL1) {
+    area : 3.0;
+    pin (A) { direction : input; }
+    pin (Y) { direction : output; function : "A"; }
+  }
+}

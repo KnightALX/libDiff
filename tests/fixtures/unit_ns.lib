@@ -1,0 +1,15 @@
+library (unit_ns) {
+  time_unit : "1ns";
+  leakage_power_unit : "1nW";
+  cell (C1) {
+    area : 1.0;
+    pin (A) { direction : input; }
+    pin (Y) {
+      direction : output;
+      timing () {
+        related_pin : "A";
+        cell_rise (t) { values ("0.1"); }
+      }
+    }
+  }
+}

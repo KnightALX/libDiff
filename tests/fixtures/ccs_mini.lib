@@ -1,0 +1,29 @@
+library (ccs_mini) {
+  time_unit : "1ns";
+  capacitive_load_unit (1,pf);
+  current_unit : "1mA";
+  cell (INVX1) {
+    area : 1.0;
+    pin (A) { direction : input; }
+    pin (Y) {
+      direction : output;
+      function : "!A";
+      timing () {
+        related_pin : "A";
+        timing_sense : negative_unate;
+        cell_rise (t) {
+          values ("0.10, 0.20");
+        }
+        output_current_rise () {
+          vector (ccs_template) {
+            reference_time : 0.1;
+            index_1 ("0.1");
+            index_2 ("0.01");
+            index_3 ("0.1, 0.2, 0.3");
+            values ("0.01, 0.02, 0.01");
+          }
+        }
+      }
+    }
+  }
+}

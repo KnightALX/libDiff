@@ -1,0 +1,40 @@
+library (ocv_constraint) {
+  time_unit : "1ns";
+  lu_table_template (constraint_2x2) {
+    variable_1 : constrained_pin_transition;
+    variable_2 : related_pin_transition;
+    index_1 ("0.1, 0.5");
+    index_2 ("0.1, 0.5");
+  }
+  cell (DFFX1) {
+    area : 4.0;
+    ff (IQ,IQN) {
+      next_state : "D";
+      clocked_on : "CK";
+    }
+    pin (D) {
+      direction : input;
+      timing () {
+        related_pin : "CK";
+        timing_type : setup_rising;
+        rise_constraint (constraint_2x2) {
+          values ("0.10, 0.12", "0.11, 0.13");
+        }
+        ocv_sigma_rise_constraint (constraint_2x2) {
+          sigma_type : early;
+          values ("0.01, 0.01", "0.01, 0.01");
+        }
+        ocv_sigma_fall_constraint (constraint_2x2) {
+          sigma_type : early;
+          values ("0.01, 0.01", "0.01, 0.01");
+        }
+        ocv_sigma_rise_contraint (constraint_2x2) {
+          sigma_type : late;
+          values ("0.02, 0.02", "0.02, 0.02");
+        }
+      }
+    }
+    pin (CK) { direction : input; }
+    pin (Q) { direction : output; }
+  }
+}
