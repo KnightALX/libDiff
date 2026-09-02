@@ -1,6 +1,6 @@
 # libDiff
 
-Liberty (`.lib`) **compare / analysis / Timing QA** for chip **FIP** design teams —
+Liberty (`.lib`) **compare / analysis / Timing QA** for chip **FIP** design teams -
 stdcell and SRAM libraries (NLDM and CCS-style tables).
 
 **Version: 0.3.0**
@@ -76,10 +76,10 @@ Or double-click `run_libDiff.bat` / `scripts\run_libDiff.bat`
 
 ## GUI
 
-- **Libraries** — load file or open folder, fnmatch filter, async load, progress + InfoBar
-- **Compare** — Area / Leakage / Timing LUT tabs with matplotlib plots
-- **Timing QA** — single or batch run, arc table, delta heatmap / curves, export CSV / HTML / JSON
-- **About** — version and scope notes
+- **Libraries** - load file or open folder, fnmatch filter, async load, progress + InfoBar
+- **Compare** - Area / Leakage / Timing LUT tabs with matplotlib plots
+- **Timing QA** - single or batch run, arc table, delta heatmap / curves, export CSV / HTML / JSON
+- **About** - version and scope notes
 - Theme follows system light / dark (`Theme.AUTO`)
 
 ### Plots and tables
