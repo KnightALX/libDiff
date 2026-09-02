@@ -120,3 +120,5 @@ Coverage includes parser, compare, empty-cell safety, Pharosc synopsys (when tha
 ## License
 
 GPL-2.0. See `LICENSE` and `IMPLEMENTATION_NOTES.md` for provenance.
+
+<!-- docs refresh: 2026-09-02 -->
