@@ -1,0 +1,25 @@
+
+libView.py is a GUI tool for library file cell information view
+and cell information comparison.
+
+It will show cell area/leakage_power/timing/internal_power 
+information.
+
+For cell view function:
+* Show cell area.
+* Show cell leakage_power values.
+* Show cell timing table (values) with 3D plots.
+* Show cell internal_power table (values) with 3D plots.
+
+For cell comparison function (only for same series cells):
+* Show cell area comparison.
+* Show cell leakage_power comparison on same conditon.
+* Show cell timing table comparison on same condition.
+* Show cell internal_power table comparison on same conditon.
+
+Notice:
+1. anaconda 3-5.2.0 is the suggested python version, It has included 
+   all of the needed python libraries.
+2. matlibplot 2.2.2 or higher version is required.
+3. liberty parser "libertyParser.py" is required, you can get it
+   from https://github.com/liyanqing1987/libertyParser.
