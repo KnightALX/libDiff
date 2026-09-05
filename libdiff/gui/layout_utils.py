@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Optional, Sequence, Tuple
 
-from PyQt5.QtCore import Qt
+from PyQt5.QtCore import Qt, QTimer
 from PyQt5.QtWidgets import (
     QHBoxLayout,
     QSizePolicy,
@@ -16,23 +16,73 @@ from PyQt5.QtWidgets import (
 from qfluentwidgets import SimpleCardWidget, StrongBodyLabel
 
 
-PLOT_MIN_H = 280
-TABLE_MIN_H = 120
+PLOT_MIN_H = 160
+TABLE_MIN_H = 64
+
+# Subtle drag handle: visible bar + hover accent (vertical & horizontal)
+_SPLITTER_HANDLE_STYLE = """
+QSplitter::handle {
+    background-color: rgba(128, 128, 128, 0.40);
+    border-radius: 2px;
+}
+QSplitter::handle:hover {
+    background-color: rgba(0, 120, 215, 0.80);
+}
+QSplitter::handle:pressed {
+    background-color: rgba(0, 90, 180, 0.95);
+}
+QSplitter::handle:vertical {
+    margin: 2px 8px;
+    min-height: 6px;
+}
+QSplitter::handle:horizontal {
+    margin: 8px 2px;
+    min-width: 6px;
+}
+"""
+
+
+def _style_splitter(split: QSplitter) -> None:
+    split.setHandleWidth(10)
+    split.setStyleSheet(_SPLITTER_HANDLE_STYLE)
+
+
+def apply_split_ratio(
+    splitter: QSplitter,
+    top_ratio: float = 0.78,
+) -> None:
+    """Apply a chart-heavy size ratio after the splitter has a real geometry."""
+    if splitter is None:
+        return
+    sizes = splitter.sizes()
+    total = sum(sizes)
+    if total <= 0:
+        # Fallbacks before first layout pass
+        if splitter.orientation() == Qt.Vertical:
+            total = max(splitter.height(), 960)
+        else:
+            total = max(splitter.width(), 960)
+    if total <= 0:
+        total = 960
+    ratio = min(max(float(top_ratio), 0.05), 0.95)
+    top = max(1, int(round(total * ratio)))
+    bottom = max(1, total - top)
+    splitter.setSizes([top, bottom])
 
 
 def make_v_splitter(
     top: QWidget,
     bottom: QWidget,
-    top_stretch: int = 3,
-    bottom_stretch: int = 2,
+    top_stretch: int = 4,
+    bottom_stretch: int = 1,
     initial_sizes: Optional[Sequence[int]] = None,
     top_min: int = PLOT_MIN_H,
     bottom_min: int = TABLE_MIN_H,
 ) -> QSplitter:
     """Vertical splitter with chart-heavy stretch (top=chart, bottom=table)."""
     split = QSplitter(Qt.Vertical)
-    split.setChildrenCollapsible(False)
-    split.setHandleWidth(6)
+    split.setChildrenCollapsible(True)
+    _style_splitter(split)
     top.setMinimumHeight(max(0, int(top_min)))
     bottom.setMinimumHeight(max(0, int(bottom_min)))
     split.addWidget(top)
@@ -42,8 +92,8 @@ def make_v_splitter(
     if initial_sizes is not None:
         split.setSizes([int(s) for s in initial_sizes])
     else:
-        # Prefer ~60/40 until the user drags
-        split.setSizes([600, 400])
+        # Prefer ~80/20 until the user drags / showEvent applies ratio
+        split.setSizes([780, 180])
     return split
 
 
@@ -53,13 +103,13 @@ def make_h_splitter(
     left_stretch: int = 1,
     right_stretch: int = 1,
     initial_sizes: Optional[Sequence[int]] = None,
-    left_min: int = 200,
-    right_min: int = 200,
+    left_min: int = 160,
+    right_min: int = 160,
 ) -> QSplitter:
     """Horizontal splitter for side-by-side plots."""
     split = QSplitter(Qt.Horizontal)
-    split.setChildrenCollapsible(False)
-    split.setHandleWidth(6)
+    split.setChildrenCollapsible(True)
+    _style_splitter(split)
     left.setMinimumWidth(max(0, int(left_min)))
     right.setMinimumWidth(max(0, int(right_min)))
     split.addWidget(left)
@@ -113,7 +163,7 @@ def labeled_pane(
 
 
 class ChartTableSection(QWidget):
-    """Vertical chart-top / table-bottom section with stretch ~3:2."""
+    """Vertical chart-top / table-bottom section with stretch ~4:1."""
 
     def __init__(
         self,
@@ -122,11 +172,14 @@ class ChartTableSection(QWidget):
         chart_title: str = "Chart",
         table_title: str = "Table",
         parent: Optional[QWidget] = None,
-        top_stretch: int = 3,
-        bottom_stretch: int = 2,
+        top_stretch: int = 4,
+        bottom_stretch: int = 1,
         initial_sizes: Optional[Sequence[int]] = None,
+        top_ratio: float = 0.78,
     ):
         super().__init__(parent=parent)
+        self._top_ratio = float(top_ratio)
+        self._ratio_applied = False
         root = QVBoxLayout(self)
         root.setContentsMargins(0, 0, 0, 0)
         root.setSpacing(0)
@@ -141,8 +194,15 @@ class ChartTableSection(QWidget):
             table_pane,
             top_stretch=top_stretch,
             bottom_stretch=bottom_stretch,
-            initial_sizes=initial_sizes,
+            initial_sizes=initial_sizes if initial_sizes is not None else [780, 180],
             top_min=PLOT_MIN_H,
             bottom_min=TABLE_MIN_H,
         )
         root.addWidget(self.splitter, 1)
+
+    def showEvent(self, event):  # noqa: N802
+        super().showEvent(event)
+        if self._ratio_applied:
+            return
+        self._ratio_applied = True
+        QTimer.singleShot(0, lambda: apply_split_ratio(self.splitter, self._top_ratio))

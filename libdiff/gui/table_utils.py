@@ -27,11 +27,13 @@ def configure_adaptive_row_height(
     max_rows: Optional[int] = None,
     row_height: int = 28,
     watch_parent: bool = True,
+    enforce_minimum: bool = True,
 ) -> None:
     """Show ~default_visible_rows by default; grow with available height.
 
-    Sets a fixed row height and a minimumHeight based on header + N rows.
-    Does not cap maximum height, so enlarging the window reveals more rows.
+    Sets a fixed row height and optionally a minimumHeight based on header + N rows.
+    When enforce_minimum is False, skips the hard minimum (or uses a tiny header+2
+    rows floor) so QSplitter can shrink the table. Does not cap maximum height.
     """
     table.verticalHeader().setVisible(False)
     table.verticalHeader().setDefaultSectionSize(row_height)
@@ -52,21 +54,19 @@ def configure_adaptive_row_height(
         return max(table.frameWidth() * 2, 2) + 4
 
     def apply_min_height() -> None:
-        rows = max(default_visible_rows, min_rows)
-        if max_rows is not None:
-            rows = min(rows, max_rows)
-        # If parent is tall, allow minimum to reflect more visible rows (still no max lock)
-        parent = table.parentWidget()
-        extra = 0
-        if parent is not None:
-            avail = parent.height()
-            # rough: table often shares space with plots; keep min at least default
-            # but if the table itself was given a large height already, don't fight it
-            pass
-        table.setMinimumHeight(_header_h() + rows * row_height + _frame())
         # Ensure existing rows use fixed height
         for r in range(table.rowCount()):
             table.setRowHeight(r, row_height)
+
+        if not enforce_minimum:
+            # Tiny floor only — do not fight QSplitter drag range
+            table.setMinimumHeight(_header_h() + 2 * row_height + _frame())
+            return
+
+        rows = max(default_visible_rows, min_rows)
+        if max_rows is not None:
+            rows = min(rows, max_rows)
+        table.setMinimumHeight(_header_h() + rows * row_height + _frame())
 
     apply_min_height()
     table._libdiff_apply_row_height = apply_min_height  # type: ignore[attr-defined]

@@ -130,7 +130,7 @@ class ComparePage(QWidget):
         area_layout.setSpacing(8)
 
         self.area_plot = PlotCanvas(area_page)
-        self.area_plot.setMinimumHeight(280)
+        self.area_plot.setMinimumHeight(160)
         self.area_plot.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
 
         self.area_table = TableWidget(area_page)
@@ -138,6 +138,9 @@ class ComparePage(QWidget):
         self.area_table.setHorizontalHeaderLabels(["Library", "Cell", "Area"])
         self.area_table.horizontalHeader().setStretchLastSection(True)
         self.area_table.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+        configure_adaptive_row_height(
+            self.area_table, default_visible_rows=3, enforce_minimum=False
+        )
 
         area_section = ChartTableSection(
             self.area_plot,
@@ -145,6 +148,10 @@ class ComparePage(QWidget):
             chart_title="Area chart",
             table_title="Area table",
             parent=area_page,
+            top_stretch=4,
+            bottom_stretch=1,
+            initial_sizes=[780, 180],
+            top_ratio=0.80,
         )
         area_layout.addWidget(area_section, 1)
         self.tabs.addTab(area_page, "Area")
@@ -165,7 +172,7 @@ class ComparePage(QWidget):
         self.leak_table.setHorizontalHeaderLabels(["Library", "Cell", "When", "PG", "Value"])
         self.leak_table.horizontalHeader().setStretchLastSection(True)
         self.leak_table.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
-        self.leak_table.setMinimumHeight(200)
+        self.leak_table.setMinimumHeight(120)
         leak_inner.addWidget(self.leak_table, 1)
         leak_layout.addWidget(leak_card, 1)
         self.tabs.addTab(leak_page, "Leakage")
@@ -197,33 +204,35 @@ class ComparePage(QWidget):
         lut_layout.addWidget(ctrl_card)
 
         self.lut_plot = PlotCanvas(lut_page)
-        self.lut_plot.setMinimumHeight(240)
+        self.lut_plot.setMinimumHeight(160)
         self.lut_plot.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         self.lut_delta_plot = PlotCanvas(lut_page)
-        self.lut_delta_plot.setMinimumHeight(200)
+        self.lut_delta_plot.setMinimumHeight(160)
         self.lut_delta_plot.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
 
-        lut_plot_pane = labeled_pane("LUT surface / heatmap", self.lut_plot, min_height=240)
-        lut_delta_pane = labeled_pane("LUT Δ heatmap (when 2 libs)", self.lut_delta_plot, min_height=200)
+        lut_plot_pane = labeled_pane("LUT surface / heatmap", self.lut_plot, min_height=160)
+        lut_delta_pane = labeled_pane("LUT Δ heatmap (when 2 libs)", self.lut_delta_plot, min_height=160)
         plot_stack = make_h_splitter(lut_plot_pane, lut_delta_pane, left_stretch=1, right_stretch=1)
-        plot_stack.setMinimumHeight(280)
+        plot_stack.setMinimumHeight(160)
 
         self.lut_table = TableWidget(lut_page)
         self.lut_table.setColumnCount(4)
         self.lut_table.setHorizontalHeaderLabels(["Library", "Cell", "Table", "Max sample"])
         self.lut_table.horizontalHeader().setStretchLastSection(True)
-        configure_adaptive_row_height(self.lut_table, default_visible_rows=6)
+        configure_adaptive_row_height(
+            self.lut_table, default_visible_rows=3, enforce_minimum=False
+        )
         self.lut_table.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
 
-        table_pane = labeled_pane("LUT samples", self.lut_table, min_height=120)
+        table_pane = labeled_pane("LUT samples", self.lut_table, min_height=64)
         lut_split = make_v_splitter(
             plot_stack,
             table_pane,
-            top_stretch=3,
-            bottom_stretch=2,
-            initial_sizes=[520, 280],
-            top_min=280,
-            bottom_min=120,
+            top_stretch=4,
+            bottom_stretch=1,
+            initial_sizes=[780, 180],
+            top_min=160,
+            bottom_min=64,
         )
         lut_layout.addWidget(lut_split, 1)
         self.tabs.addTab(lut_page, "Timing LUT")
@@ -334,35 +343,44 @@ class TimingQAPage(QWidget):
 
         root.addWidget(ctrl_card)
 
-        # --- charts TOP (compact grid) / arc_table BOTTOM ---
-        plots_host = QWidget()
-        plots_grid = QGridLayout(plots_host)
-        plots_grid.setContentsMargins(4, 4, 4, 4)
-        plots_grid.setHorizontalSpacing(8)
-        plots_grid.setVerticalSpacing(8)
+        # --- charts TOP as tabs (Δ / Curves / LUTs) / arc_table BOTTOM ---
+        charts_tabs = TabWidget()
 
-        self.delta_plot = PlotCanvas(plots_host)
-        self.delta_plot.setMinimumHeight(180)
+        self.delta_plot = PlotCanvas()
+        self.delta_plot.setMinimumHeight(160)
         self.delta_plot.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
-        self.curve_plot = PlotCanvas(plots_host)
+        delta_page = QWidget()
+        delta_l = QVBoxLayout(delta_page)
+        delta_l.setContentsMargins(4, 4, 4, 4)
+        delta_l.addWidget(self.delta_plot, 1)
+        charts_tabs.addTab(delta_page, "Δ heatmap")
+
+        self.curve_plot = PlotCanvas()
         self.curve_plot.setMinimumHeight(160)
         self.curve_plot.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
-        self.left_lut_plot = PlotCanvas(plots_host)
-        self.right_lut_plot = PlotCanvas(plots_host)
+        curve_page = QWidget()
+        curve_l = QVBoxLayout(curve_page)
+        curve_l.setContentsMargins(4, 4, 4, 4)
+        curve_l.addWidget(self.curve_plot, 1)
+        charts_tabs.addTab(curve_page, "Curves")
+
+        self.left_lut_plot = PlotCanvas()
+        self.right_lut_plot = PlotCanvas()
         self.left_lut_plot.setMinimumHeight(140)
         self.right_lut_plot.setMinimumHeight(140)
         self.left_lut_plot.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         self.right_lut_plot.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+        left_pane = labeled_pane("Left LUT", self.left_lut_plot, min_height=140)
+        right_pane = labeled_pane("Right LUT", self.right_lut_plot, min_height=140)
+        lut_h = make_h_splitter(left_pane, right_pane, left_stretch=1, right_stretch=1)
+        lut_page = QWidget()
+        lut_l = QVBoxLayout(lut_page)
+        lut_l.setContentsMargins(4, 4, 4, 4)
+        lut_l.addWidget(lut_h, 1)
+        charts_tabs.addTab(lut_page, "LUTs")
 
-        plots_grid.addWidget(labeled_pane("Δ heatmap", self.delta_plot), 0, 0)
-        plots_grid.addWidget(labeled_pane("Delay curves (left vs right)", self.curve_plot), 0, 1)
-        plots_grid.addWidget(labeled_pane("Left LUT", self.left_lut_plot), 1, 0)
-        plots_grid.addWidget(labeled_pane("Right LUT", self.right_lut_plot), 1, 1)
-        plots_grid.setRowStretch(0, 3)
-        plots_grid.setRowStretch(1, 2)
-        plots_grid.setColumnStretch(0, 1)
-        plots_grid.setColumnStretch(1, 1)
-        plots_host.setMinimumHeight(320)
+        charts_tabs.setMinimumHeight(160)
+        charts_tabs.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
 
         table_card = SimpleCardWidget()
         table_l = QVBoxLayout(table_card)
@@ -375,20 +393,22 @@ class TimingQAPage(QWidget):
             ["Status", "Cell", "Pin", "Related", "Table", "max_abs", "max_rel", "Index"]
         )
         self.arc_table.horizontalHeader().setStretchLastSection(True)
-        configure_adaptive_row_height(self.arc_table, default_visible_rows=6)
+        configure_adaptive_row_height(
+            self.arc_table, default_visible_rows=3, enforce_minimum=False
+        )
         self.arc_table.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         self.arc_table.setSelectionBehavior(self.arc_table.SelectRows)
         self.arc_table.setSelectionMode(self.arc_table.SingleSelection)
         table_l.addWidget(self.arc_table, 1)
 
         results_split = make_v_splitter(
-            plots_host,
+            charts_tabs,
             table_card,
-            top_stretch=3,
-            bottom_stretch=2,
-            initial_sizes=[540, 320],
-            top_min=300,
-            bottom_min=140,
+            top_stretch=4,
+            bottom_stretch=1,
+            initial_sizes=[780, 180],
+            top_min=160,
+            bottom_min=64,
         )
         root.addWidget(results_split, 1)
 
@@ -487,7 +507,7 @@ class PPAPage(QWidget):
         kpi_inner.addWidget(self.kpi_label)
         dash_l.addWidget(kpi_card)
         self.radar_plot = PlotCanvas(dash_page)
-        self.radar_plot.setMinimumHeight(320)
+        self.radar_plot.setMinimumHeight(200)
         self.radar_plot.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         dash_l.addWidget(wrap_card("PPA radar", self.radar_plot), 1)
         self.tabs.addTab(dash_page, "Dashboard")
@@ -497,7 +517,7 @@ class PPAPage(QWidget):
         area_l = QVBoxLayout(area_page)
         area_l.setContentsMargins(8, 8, 8, 8)
         self.area_plot = PlotCanvas(area_page)
-        self.area_plot.setMinimumHeight(320)
+        self.area_plot.setMinimumHeight(200)
         self.area_plot.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         area_l.addWidget(wrap_card("Area / Leakage by drive", self.area_plot), 1)
         self.tabs.addTab(area_page, "Area")
@@ -507,7 +527,7 @@ class PPAPage(QWidget):
         timing_l = QVBoxLayout(timing_page)
         timing_l.setContentsMargins(8, 8, 8, 8)
         self.delay_plot = PlotCanvas(timing_page)
-        self.delay_plot.setMinimumHeight(320)
+        self.delay_plot.setMinimumHeight(200)
         self.delay_plot.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         timing_l.addWidget(wrap_card("Delay vs load overlay", self.delay_plot), 1)
         self.tabs.addTab(timing_page, "Timing")
@@ -527,7 +547,9 @@ class PPAPage(QWidget):
             ["Cell", "Family", "Area %", "Leak %", "Delay %", "Area abs", "Leak abs", "Delay abs"]
         )
         self.ppa_table.horizontalHeader().setStretchLastSection(True)
-        configure_adaptive_row_height(self.ppa_table, default_visible_rows=6)
+        configure_adaptive_row_height(
+            self.ppa_table, default_visible_rows=3, enforce_minimum=False
+        )
         self.ppa_table.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         data_inner.addWidget(self.ppa_table, 1)
         data_l.addWidget(data_card, 1)
