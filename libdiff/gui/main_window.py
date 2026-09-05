@@ -58,7 +58,7 @@ class MainWindow(FluentWindow):
         self.series_patterns = list(DEFAULT_SERIES_PATTERNS)
 
         self.setWindowTitle("libDiff - FIP stdcell/SRAM Liberty compare")
-        self.resize(1400, 800)
+        self.resize(1440, 900)
 
         self.librariesPage = LibrariesPage(self)
         self.comparePage = ComparePage(self)
@@ -439,6 +439,8 @@ class MainWindow(FluentWindow):
                 ("N/A" if s.get("mean_delay_pct") is None else "%+.2f" % s.get("mean_delay_pct")),
             )
         )
+        if hasattr(ppa, "kpi_label"):
+            ppa.kpi_label.setText(ppa.summary_label.text())
         InfoBar.success(
             title="PPA done",
             content=ppa.summary_label.text(),
