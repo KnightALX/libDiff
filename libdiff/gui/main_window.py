@@ -5,7 +5,6 @@ from __future__ import annotations
 import fnmatch
 import json
 import os
-import re
 import sys
 from collections import OrderedDict
 from typing import Dict, List, Optional, Sequence
@@ -25,9 +24,16 @@ from qfluentwidgets import (
     setTheme,
 )
 
-from libdiff.gui.pages import AboutPage, ComparePage, LibrariesPage, TimingQAPage
+from libdiff.gui.pages import AboutPage, ComparePage, LibrariesPage, PPAPage, TimingQAPage
 from libdiff.gui.workers import LoadLibraryWorker
 from libdiff.model.library import Library, NA
+from libdiff.compare.ppa import (
+    compare_ppa,
+    export_ppa_csv,
+    export_ppa_html,
+    export_ppa_json,
+    format_ppa_summary,
+)
 from libdiff.compare.timing_qa import (
     timing_qa,
     export_timing_qa_csv,
@@ -38,56 +44,11 @@ from libdiff.compare.timing_qa import (
     export_timing_qa_html,
 )
 
-# Configurable series sort patterns: (regex, size_group_index)
-DEFAULT_SERIES_PATTERNS = [
-    (re.compile(r"^(.+?)D(\d+)(BWP.*)$"), 2),
-    # pharosc-style: inv_x1, a2_x4
-    (re.compile(r"^(.+?)_x(\d+)$", re.IGNORECASE), 2),
-    # pharosc-style: iv1v0x2, nd2v0x4, aoi21v0x1
-    (re.compile(r"^(.+?)v\d+x(\d+)$", re.IGNORECASE), 2),
-    (re.compile(r"^(.+?)X(\d+)$", re.IGNORECASE), 2),
-    (re.compile(r"^(.+?)_(\d+)$"), 2),
-]
-
-
-def sort_cells_with_size(orig_cell_list, patterns=None):
-    patterns = patterns or DEFAULT_SERIES_PATTERNS
-    series = OrderedDict()
-    series["zzz"] = []
-    for cell_name in orig_cell_list:
-        matched = False
-        for cre, size_gi in patterns:
-            m = cre.match(cell_name)
-            if m:
-                parts = list(m.groups())
-                size_idx = size_gi - 1
-                key_parts = parts[:size_idx] + parts[size_idx + 1 :]
-                key = "".join(key_parts)
-                series.setdefault(key, []).append((int(m.group(size_gi)), cell_name))
-                matched = True
-                break
-        if not matched:
-            series["zzz"].append(cell_name)
-    for key in list(series.keys()):
-        if key == "zzz":
-            continue
-        if len(series[key]) == 1:
-            series["zzz"].append(series[key][0][1])
-            series.pop(key)
-    out = []
-    for key in sorted(series.keys()):
-        items = series[key]
-        if key == "zzz":
-            items = sorted(items)
-            out.extend(items)
-        else:
-            items = sorted(items, key=lambda t: t[0])
-            out.extend([c for _, c in items])
-    return out
+from libdiff.series import DEFAULT_SERIES_PATTERNS, sort_cells_with_size
 
 
 class MainWindow(FluentWindow):
-    """Fluent shell: Libraries / Compare / Timing QA / About."""
+    """Fluent shell: Libraries / Compare / Timing QA / PPA / About."""
 
     def __init__(self, input_files: Optional[Sequence[str]] = None):
         super().__init__()
@@ -102,6 +63,7 @@ class MainWindow(FluentWindow):
         self.librariesPage = LibrariesPage(self)
         self.comparePage = ComparePage(self)
         self.timingQaPage = TimingQAPage(self)
+        self.ppaPage = PPAPage(self)
         self.aboutPage = AboutPage(self)
 
         self.addSubInterface(self.librariesPage, FluentIcon.LIBRARY, "Libraries")
@@ -111,6 +73,10 @@ class MainWindow(FluentWindow):
             FluentIcon, "SIMILAR", FluentIcon.SYNC
         )
         self.addSubInterface(self.timingQaPage, qa_icon, "时序QA")
+        ppa_icon = getattr(FluentIcon, "SPEED_HIGH", None) or getattr(
+            FluentIcon, "PIE_SINGLE", None
+        ) or getattr(FluentIcon, "MARKET", FluentIcon.VIEW)
+        self.addSubInterface(self.ppaPage, ppa_icon, "PPA")
         self.addSubInterface(
             self.aboutPage,
             FluentIcon.INFO,
@@ -143,6 +109,14 @@ class MainWindow(FluentWindow):
         tq.right_lib.currentTextChanged.connect(lambda _t: self._refresh_timing_qa_cells())
         tq.cell_filter.textChanged.connect(lambda _t: self._refresh_timing_qa_cells())
         tq.cell_filter.searchSignal.connect(lambda _t: self._refresh_timing_qa_cells())
+
+        ppa = self.ppaPage
+        ppa.run_btn.clicked.connect(self._run_ppa)
+        ppa.export_html_btn.clicked.connect(self._export_ppa_html)
+        ppa.export_csv_btn.clicked.connect(self._export_ppa_csv)
+        ppa.export_json_btn.clicked.connect(self._export_ppa_json)
+        ppa.left_lib.currentTextChanged.connect(lambda _t: None)
+        ppa.right_lib.currentTextChanged.connect(lambda _t: None)
 
     # --- load ---
 
@@ -230,6 +204,7 @@ class MainWindow(FluentWindow):
         )
         self._rebuild_tree()
         self._refresh_timing_qa_lib_combos()
+        self._refresh_ppa_lib_combos()
 
     def _on_lib_failed(self, message: str):
         self._set_loading(False)
@@ -404,6 +379,227 @@ class MainWindow(FluentWindow):
     def _lib_display_map(self) -> Dict[str, str]:
         """display_name -> abs key (last wins if duplicate basenames)."""
         return {lib.display_name: key for key, lib in self.libs.items()}
+
+
+    def _refresh_ppa_lib_combos(self):
+        ppa = self.ppaPage
+        names = [lib.display_name for lib in self.libs.values()]
+        for combo in (ppa.left_lib, ppa.right_lib):
+            cur = combo.currentText()
+            combo.blockSignals(True)
+            combo.clear()
+            combo.addItems(names)
+            if cur in names:
+                combo.setCurrentText(cur)
+            combo.blockSignals(False)
+        if len(names) >= 2:
+            if ppa.left_lib.currentIndex() < 0:
+                ppa.left_lib.setCurrentIndex(0)
+            if not ppa.right_lib.currentText() or ppa.right_lib.currentText() == ppa.left_lib.currentText():
+                ppa.right_lib.setCurrentIndex(1 if ppa.left_lib.currentIndex() == 0 else 0)
+
+    def _run_ppa(self):
+        ppa = self.ppaPage
+        dmap = self._lib_display_map()
+        left_key = dmap.get(ppa.left_lib.currentText())
+        right_key = dmap.get(ppa.right_lib.currentText())
+        if not left_key or not right_key:
+            InfoBar.warning(
+                title="Select libraries",
+                content="Load and select Baseline / Compare .lib first",
+                duration=4000,
+                position=InfoBarPosition.TOP,
+                parent=self,
+            )
+            return
+        mode_txt = ppa.mode_combo.currentText() or "stdcell"
+        mode = "sram" if mode_txt.startswith("sram") else "stdcell"
+        pattern = (ppa.cell_filter.text() or "").strip() or None
+        try:
+            report = compare_ppa(
+                self.libs[left_key],
+                self.libs[right_key],
+                cell_pattern=pattern,
+                mode=mode,
+                notes=(ppa.notes_edit.text() or "").strip(),
+            )
+        except Exception as exc:  # noqa: BLE001
+            MessageBox("PPA error", str(exc), self).exec()
+            return
+        ppa.last_report = report
+        self._fill_ppa_table(report)
+        self._draw_ppa_plots(report)
+        s = report.get("summary") or {}
+        ppa.summary_label.setText(
+            "cells=%s  Area%%=%s  Leak%%=%s  Delay%%=%s"
+            % (
+                s.get("n_cells_compared"),
+                ("N/A" if s.get("mean_area_pct") is None else "%+.2f" % s.get("mean_area_pct")),
+                ("N/A" if s.get("mean_leakage_pct") is None else "%+.2f" % s.get("mean_leakage_pct")),
+                ("N/A" if s.get("mean_delay_pct") is None else "%+.2f" % s.get("mean_delay_pct")),
+            )
+        )
+        InfoBar.success(
+            title="PPA done",
+            content=ppa.summary_label.text(),
+            duration=4000,
+            position=InfoBarPosition.TOP,
+            parent=self,
+        )
+
+    def _fill_ppa_table(self, report: dict):
+        ppa = self.ppaPage
+        ppa.ppa_table.setRowCount(0)
+        for name in sorted((report.get("cells") or {}).keys()):
+            c = report["cells"][name]
+            a, lk, d = c.get("area") or {}, c.get("leakage") or {}, c.get("delay") or {}
+
+            def pct(v):
+                return "N/A" if v is None else ("%+.3f%%" % v)
+
+            def absv(v):
+                return "N/A" if v is None else ("%.6g" % v)
+
+            vals = [
+                name,
+                str(c.get("series_family") or ""),
+                pct(a.get("pct")),
+                pct(lk.get("pct")),
+                pct(d.get("pct")),
+                absv(a.get("abs")),
+                absv(lk.get("abs")),
+                absv(d.get("abs")),
+            ]
+            r = ppa.ppa_table.rowCount()
+            ppa.ppa_table.insertRow(r)
+            for col, v in enumerate(vals):
+                ppa.ppa_table.setItem(r, col, QTableWidgetItem(v))
+
+    def _draw_ppa_plots(self, report: dict):
+        ppa = self.ppaPage
+        if report.get("mode") == "sram" or (report.get("summary") or {}).get("stub"):
+            ppa.area_plot.draw_empty("SRAM mode stub")
+            ppa.delay_plot.draw_empty("SRAM mode stub")
+            ppa.radar_plot.draw_empty("SRAM mode stub")
+            return
+        try:
+            from libdiff.plotting.ppa_charts import (
+                figure_area_series_bars,
+                figure_delay_load_overlay,
+                figure_ppa_radar,
+            )
+
+            fig = figure_area_series_bars(report, metric="area", fig=ppa.area_plot.figure)
+            if fig is None:
+                ppa.area_plot.draw_empty("No area series")
+            else:
+                try:
+                    fig.tight_layout()
+                except Exception:
+                    pass
+                ppa.area_plot.draw()
+
+            fig = figure_delay_load_overlay(report, fig=ppa.delay_plot.figure)
+            if fig is None:
+                ppa.delay_plot.draw_empty("No delay curves")
+            else:
+                try:
+                    fig.tight_layout()
+                except Exception:
+                    pass
+                ppa.delay_plot.draw()
+
+            fig = figure_ppa_radar(report, fig=ppa.radar_plot.figure)
+            if fig is None:
+                ppa.radar_plot.draw_empty("No radar metrics")
+            else:
+                try:
+                    fig.tight_layout()
+                except Exception:
+                    pass
+                ppa.radar_plot.draw()
+        except Exception as exc:  # noqa: BLE001
+            ppa.area_plot.draw_empty(str(exc))
+            ppa.delay_plot.draw_empty()
+            ppa.radar_plot.draw_empty()
+
+    def _export_ppa_html(self):
+
+        ppa = self.ppaPage
+        if not ppa.last_report:
+            InfoBar.warning(
+                title="No report",
+                content="Run PPA first",
+                duration=3000,
+                position=InfoBarPosition.TOP,
+                parent=self,
+            )
+            return
+        path, _ = QFileDialog.getSaveFileName(
+            self, "Export PPA HTML", "ppa_report.html", "HTML (*.html)"
+        )
+        if not path:
+            return
+        export_ppa_html(ppa.last_report, path=path, embed_plots=True)
+        ppa.last_html_path = path
+        ppa.report_path_label.setText("HTML: %s" % path)
+        InfoBar.success(
+            title="HTML exported",
+            content=path,
+            duration=3000,
+            position=InfoBarPosition.TOP,
+            parent=self,
+        )
+
+    def _export_ppa_csv(self):
+        ppa = self.ppaPage
+        if not ppa.last_report:
+            InfoBar.warning(
+                title="No report",
+                content="Run PPA first",
+                duration=3000,
+                position=InfoBarPosition.TOP,
+                parent=self,
+            )
+            return
+        path, _ = QFileDialog.getSaveFileName(
+            self, "Export PPA CSV", "ppa_report.csv", "CSV (*.csv)"
+        )
+        if not path:
+            return
+        export_ppa_csv(ppa.last_report, path=path)
+        InfoBar.success(
+            title="CSV exported",
+            content=path,
+            duration=3000,
+            position=InfoBarPosition.TOP,
+            parent=self,
+        )
+
+    def _export_ppa_json(self):
+        ppa = self.ppaPage
+        if not ppa.last_report:
+            InfoBar.warning(
+                title="No report",
+                content="Run PPA first",
+                duration=3000,
+                position=InfoBarPosition.TOP,
+                parent=self,
+            )
+            return
+        path, _ = QFileDialog.getSaveFileName(
+            self, "Export PPA JSON", "ppa_report.json", "JSON (*.json)"
+        )
+        if not path:
+            return
+        export_ppa_json(ppa.last_report, path=path)
+        InfoBar.success(
+            title="JSON exported",
+            content=path,
+            duration=3000,
+            position=InfoBarPosition.TOP,
+            parent=self,
+        )
 
     def _refresh_timing_qa_lib_combos(self):
         tq = self.timingQaPage

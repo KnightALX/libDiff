@@ -342,6 +342,124 @@ class TimingQAPage(QWidget):
         root.addWidget(split, 1)
 
 
+
+class PPAPage(QWidget):
+    """Stdcell PPA compare — Area / Leakage / typical Delay vs baseline."""
+
+    def __init__(self, parent=None):
+        super().__init__(parent=parent)
+        self.setObjectName("ppaPage")
+        self.last_report = None
+        self.last_html_path = ""
+        self._build()
+
+    def _build(self):
+        root = QVBoxLayout(self)
+        root.setContentsMargins(24, 24, 24, 24)
+        root.setSpacing(12)
+
+        root.addWidget(TitleLabel("PPA / 功耗面积时序"))
+        root.addWidget(
+            CaptionLabel(
+                "Stdcell PPA vs baseline · Area / Leakage / typical delay · "
+                "series-aware charts · one-page HTML · SRAM mode stub later"
+            )
+        )
+
+        ctrl_card = ElevatedCardWidget(self)
+        ctrl = QVBoxLayout(ctrl_card)
+        ctrl.setContentsMargins(16, 16, 16, 16)
+        ctrl.setSpacing(10)
+
+        form = QGridLayout()
+        form.setHorizontalSpacing(10)
+        form.setVerticalSpacing(8)
+
+        form.addWidget(BodyLabel("Baseline (left)"), 0, 0)
+        self.left_lib = ComboBox(ctrl_card)
+        form.addWidget(self.left_lib, 0, 1)
+
+        form.addWidget(BodyLabel("Compare (right)"), 0, 2)
+        self.right_lib = ComboBox(ctrl_card)
+        form.addWidget(self.right_lib, 0, 3)
+
+        form.addWidget(BodyLabel("Cell filter"), 1, 0)
+        self.cell_filter = SearchLineEdit(ctrl_card)
+        self.cell_filter.setPlaceholderText("fnmatch e.g. INV*")
+        self.cell_filter.setClearButtonEnabled(True)
+        form.addWidget(self.cell_filter, 1, 1)
+
+        form.addWidget(BodyLabel("Mode"), 1, 2)
+        self.mode_combo = ComboBox(ctrl_card)
+        self.mode_combo.addItems(["stdcell", "sram (stub)"])
+        form.addWidget(self.mode_combo, 1, 3)
+
+        form.addWidget(BodyLabel("Notes"), 2, 0)
+        self.notes_edit = LineEdit(ctrl_card)
+        self.notes_edit.setPlaceholderText("Optional cover notes for HTML report")
+        form.addWidget(self.notes_edit, 2, 1, 1, 3)
+
+        form.setColumnStretch(1, 1)
+        form.setColumnStretch(3, 1)
+        ctrl.addLayout(form)
+
+        btns = QHBoxLayout()
+        self.run_btn = PrimaryPushButton("Run PPA")
+        self.export_html_btn = PushButton("Export HTML")
+        self.export_csv_btn = PushButton("Export CSV")
+        self.export_json_btn = PushButton("Export JSON")
+        btns.addWidget(self.run_btn)
+        btns.addWidget(self.export_html_btn)
+        btns.addWidget(self.export_csv_btn)
+        btns.addWidget(self.export_json_btn)
+        btns.addStretch(1)
+        self.summary_label = CaptionLabel("Not run yet")
+        btns.addWidget(self.summary_label)
+        ctrl.addLayout(btns)
+        self.report_path_label = CaptionLabel("")
+        ctrl.addWidget(self.report_path_label)
+        root.addWidget(ctrl_card)
+
+        split = QSplitter(Qt.Horizontal)
+        split.setChildrenCollapsible(False)
+
+        table_card = SimpleCardWidget()
+        table_l = QVBoxLayout(table_card)
+        table_l.setContentsMargins(12, 12, 12, 12)
+        table_l.addWidget(StrongBodyLabel("PPA table (baseline / %Δ)"))
+        self.ppa_table = TableWidget(table_card)
+        self.ppa_table.setColumnCount(8)
+        self.ppa_table.setHorizontalHeaderLabels(
+            ["Cell", "Family", "Area %", "Leak %", "Delay %", "Area abs", "Leak abs", "Delay abs"]
+        )
+        self.ppa_table.horizontalHeader().setStretchLastSection(True)
+        configure_adaptive_row_height(self.ppa_table, default_visible_rows=6)
+        self.ppa_table.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+        table_l.addWidget(self.ppa_table)
+        split.addWidget(table_card)
+
+        plots_card = SimpleCardWidget()
+        plots_l = QVBoxLayout(plots_card)
+        plots_l.setContentsMargins(12, 12, 12, 12)
+        plots_l.addWidget(StrongBodyLabel("Area / Leakage by drive"))
+        self.area_plot = PlotCanvas(plots_card)
+        self.area_plot.setMinimumHeight(160)
+        plots_l.addWidget(self.area_plot)
+        plots_l.addWidget(StrongBodyLabel("Delay vs load overlay"))
+        self.delay_plot = PlotCanvas(plots_card)
+        self.delay_plot.setMinimumHeight(160)
+        plots_l.addWidget(self.delay_plot)
+        plots_l.addWidget(StrongBodyLabel("PPA radar"))
+        self.radar_plot = PlotCanvas(plots_card)
+        self.radar_plot.setMinimumHeight(180)
+        plots_l.addWidget(self.radar_plot)
+        split.addWidget(plots_card)
+
+        split.setStretchFactor(0, 3)
+        split.setStretchFactor(1, 4)
+        root.addWidget(split, 1)
+
+
 class AboutPage(QWidget):
     """Version and FIP purpose."""
 
@@ -371,7 +489,7 @@ class AboutPage(QWidget):
         inner.addWidget(
             CaptionLabel(
                 "Load multiple .lib files · filter cells · compare area, leakage, and timing LUTs.\n"
-                "Timing QA: NLDM Δ matrices, missing arcs, thresholds (no SPICE).\n"
+                "Timing QA: NLDM Δ matrices, missing arcs, thresholds (no SPICE).\n                PPA: stdcell Area/Leakage/typical-delay vs baseline (SRAM later).\n"
                 "UI: PyQt-Fluent-Widgets · Theme: AUTO (follows system light/dark).\n"
                 "Parser and compare logic are unchanged from the CLI."
             )

@@ -14,6 +14,15 @@ from libdiff.compare.timing_qa import (
     export_timing_qa_html,
     format_timing_qa_batch_summary,
 )
+from libdiff.compare.ppa import (
+    compare_ppa,
+    export_ppa_json,
+    export_ppa_csv,
+    export_ppa_html,
+    format_ppa_summary,
+    typical_delay,
+    cell_leakage_total,
+)
 
 __all__ = [
     "compare_libraries",
@@ -30,4 +39,11 @@ __all__ = [
     "export_timing_qa_batch_csv",
     "export_timing_qa_html",
     "format_timing_qa_batch_summary",
+    "compare_ppa",
+    "export_ppa_json",
+    "export_ppa_csv",
+    "export_ppa_html",
+    "format_ppa_summary",
+    "typical_delay",
+    "cell_leakage_total",
 ]

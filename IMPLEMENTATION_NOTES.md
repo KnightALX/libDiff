@@ -54,3 +54,26 @@ un_timing_qa_batch) + self-contained **HTML** report (inline CSS, optional base6
 - GUI Timing QA: Batch / Export HTML buttons + summary label.
 - Version aligned to **0.3.0** in libdiff/__init__.py and pyproject.toml.
 - Still matplotlib-only (no Plotly / PyQtWebEngine).
+
+
+## Phase A — stdcell PPA (2026-09-05)
+
+Adds review-grade **PPA** workflow for standard-cell design teams (matplotlib only):
+
+- `libdiff/compare/ppa.py` — baseline-normalized Area, Leakage (sum of `leakage_power`), typical delay (mid-slew/mid-load `cell_rise` LUT sample); abs Δ and %Δ; missing-safe; unit notes.
+- `libdiff/series.py` — shared drive-family patterns (INVX1/X2, inv_x1, iv1v0x2, …); GUI imports these (no PyQt dependency from PPA/CLI).
+- `libdiff/plotting/ppa_charts.py` — series Area/Leakage bars, delay–load overlay, compact PPA radar (Qt-free for CLI HTML).
+- One-page HTML report (`export_ppa_html`) with cover, KPI cards, embedded PNGs, baseline/%Δ table.
+- CLI: `python -m libdiff ppa LEFT RIGHT --html out.html --csv out.csv`
+- Fluent GUI **PPA** page (does not change Timing LUT ~6-row table behavior).
+- SRAM mode: `--mode sram` / GUI "sram (stub)" returns stub report only — full SRAM later.
+- Tests: `tests/test_ppa.py` (metric %Δ, series grouping, HTML smoke, CLI).
+
+Verify:
+
+```bash
+python -m pytest -q
+python -m libdiff ppa tests/fixtures/stdcell_base.lib tests/fixtures/stdcell_perturbed.lib --html /tmp/ppa.html --csv /tmp/ppa.csv
+python -m libdiff gui tests/fixtures/stdcell_base.lib tests/fixtures/stdcell_perturbed.lib
+# then open nav item "PPA", select libs, Run PPA
+```

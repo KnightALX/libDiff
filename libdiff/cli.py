@@ -11,6 +11,13 @@ from typing import List, Optional
 from libdiff import __version__
 from libdiff.analyze import analyze_library, format_analyze_report
 from libdiff.compare.diff import compare_libraries, export_csv, export_json
+from libdiff.compare.ppa import (
+    compare_ppa,
+    export_ppa_csv,
+    export_ppa_html,
+    export_ppa_json,
+    format_ppa_summary,
+)
 from libdiff.compare.timing_qa import (
     timing_qa,
     export_timing_qa_csv,
@@ -78,6 +85,26 @@ def _build_parser() -> argparse.ArgumentParser:
                     help="Compare all cells common to both libs (implies --batch)")
     tq.add_argument("--html", dest="html_out", default=None,
                     help="Write self-contained HTML report to path")
+
+
+    # ppa
+    ppa = sub.add_parser(
+        "ppa",
+        help="Stdcell PPA compare: Area / Leakage / typical delay vs baseline",
+    )
+    ppa.add_argument("left", help="Baseline .lib path")
+    ppa.add_argument("right", help="Compare .lib path")
+    ppa.add_argument("--cell", dest="cell_pattern", default=None,
+                     help="fnmatch cell pattern, e.g. INV*")
+    ppa.add_argument("--cells", nargs="*", default=None, help="Exact cell name list")
+    ppa.add_argument("--mode", choices=["stdcell", "sram"], default="stdcell",
+                     help="Analysis mode (sram is stub-only in Phase A)")
+    ppa.add_argument("--notes", default="", help="Free-text notes for HTML cover")
+    ppa.add_argument("--json", dest="json_out", nargs="?", const="-", default=None,
+                     help="Write JSON (path or stdout)")
+    ppa.add_argument("--csv", dest="csv_out", default=None, help="Write CSV report to path")
+    ppa.add_argument("--html", dest="html_out", default=None,
+                     help="Write one-page PPA HTML report to path")
 
     # cells
     cells = sub.add_parser("cells", help="List cells in a library")
@@ -268,6 +295,43 @@ def cmd_analyze(args: argparse.Namespace) -> int:
     return 0
 
 
+
+def cmd_ppa(args: argparse.Namespace) -> int:
+    report = compare_ppa(
+        args.left,
+        args.right,
+        cells=args.cells,
+        cell_pattern=args.cell_pattern,
+        mode=args.mode,
+        notes=args.notes or "",
+    )
+    if args.json_out is not None:
+        text = export_ppa_json(report)
+        if args.json_out == "-":
+            sys.stdout.write(text)
+            if not text.endswith("\n"):
+                sys.stdout.write("\n")
+        else:
+            export_ppa_json(report, path=args.json_out)
+            print("Wrote JSON:", args.json_out)
+    if args.csv_out:
+        export_ppa_csv(report, path=args.csv_out)
+        print("Wrote CSV:", args.csv_out)
+    if args.html_out:
+        export_ppa_html(report, path=args.html_out, embed_plots=True)
+        print("Wrote HTML:", args.html_out)
+
+    wrote_file = bool(
+        args.csv_out or args.html_out or (args.json_out is not None and args.json_out != "-")
+    )
+    if args.json_out is None and not args.csv_out and not args.html_out:
+        print(format_ppa_summary(report))
+    elif wrote_file and (args.json_out is None or args.json_out != "-"):
+        print(format_ppa_summary(report))
+    # non-zero only for sram stub when explicitly requested? keep 0 for ok compare
+    return 0
+
+
 def cmd_gui(args: argparse.Namespace) -> int:
     from libdiff.gui.main_window import run_gui
     return run_gui(args.libs or [])
@@ -292,6 +356,8 @@ def main(argv: Optional[List[str]] = None) -> int:
             return cmd_discover(args)
         if args.command == "analyze":
             return cmd_analyze(args)
+        if args.command == "ppa":
+            return cmd_ppa(args)
         if args.command == "gui":
             return cmd_gui(args)
         parser.print_help()
