@@ -25,6 +25,7 @@ def test_help():
     assert r.returncode == 0
     assert "compare" in r.stdout
     assert "timing-qa" in r.stdout
+    assert "ppa" in r.stdout
 
 
 def test_compare_json(stdcell_base, stdcell_perturbed):

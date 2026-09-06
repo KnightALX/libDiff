@@ -2,15 +2,12 @@
 
 from __future__ import annotations
 
-from PyQt5.QtCore import Qt
 from PyQt5.QtWidgets import (
+    QGridLayout,
     QHBoxLayout,
+    QSizePolicy,
     QVBoxLayout,
     QWidget,
-    QGridLayout,
-    QSizePolicy,
-    QSplitter,
-    QFormLayout,
 )
 
 from qfluentwidgets import (
@@ -29,11 +26,22 @@ from qfluentwidgets import (
     StrongBodyLabel,
     SubtitleLabel,
     TableWidget,
-    TabWidget,
     TitleLabel,
     TreeWidget,
 )
 
+try:
+    from qfluentwidgets import TabWidget
+except ImportError:  # older PyQt-Fluent-Widgets (e.g. 1.5.x)
+    from PyQt5.QtWidgets import QTabWidget as TabWidget
+
+from libdiff.gui.layout_utils import (
+    ChartTableSection,
+    labeled_pane,
+    make_h_splitter,
+    make_v_splitter,
+    wrap_card,
+)
 from libdiff.gui.plots import PlotCanvas
 from libdiff.gui.table_utils import configure_adaptive_row_height
 from libdiff import __version__
@@ -87,7 +95,7 @@ class LibrariesPage(QWidget):
         self.tree = TreeWidget(self)
         self.tree.setHeaderLabels(["Library / Cell"])
         self.tree.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
-        card_layout.addWidget(self.tree)
+        card_layout.addWidget(self.tree, 1)
 
         hint = CaptionLabel("Libraries keyed by absolute path. Check cells, then open Compare.")
         card_layout.addWidget(hint)
@@ -96,7 +104,7 @@ class LibrariesPage(QWidget):
 
 
 class ComparePage(QWidget):
-    """Area / leakage / timing LUT tables and plots for selected cells."""
+    """Area / leakage / timing LUT — charts first, tables second."""
 
     def __init__(self, parent=None):
         super().__init__(parent=parent)
@@ -110,89 +118,130 @@ class ComparePage(QWidget):
 
         root.addWidget(TitleLabel("Compare"))
         root.addWidget(
-            CaptionLabel("Area · Leakage · Timing LUT - N/A-safe display for missing values")
+            CaptionLabel("Area · Leakage · Timing LUT — charts first, tables below · N/A-safe display")
         )
 
         self.tabs = TabWidget(self)
 
-        # --- Area ---
+        # --- Area: chart TOP / table BOTTOM ---
         area_page = QWidget()
         area_layout = QVBoxLayout(area_page)
         area_layout.setContentsMargins(8, 8, 8, 8)
-        area_card = SimpleCardWidget(area_page)
-        area_inner = QVBoxLayout(area_card)
-        self.area_table = TableWidget(area_card)
+        area_layout.setSpacing(8)
+
+        self.area_plot = PlotCanvas(area_page)
+        self.area_plot.setMinimumHeight(160)
+        self.area_plot.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+
+        self.area_table = TableWidget(area_page)
         self.area_table.setColumnCount(3)
         self.area_table.setHorizontalHeaderLabels(["Library", "Cell", "Area"])
         self.area_table.horizontalHeader().setStretchLastSection(True)
-        self.area_plot = PlotCanvas(area_card)
-        self.area_plot.setMinimumHeight(220)
-        area_inner.addWidget(StrongBodyLabel("Area table"))
-        area_inner.addWidget(self.area_table, 1)
-        area_inner.addWidget(StrongBodyLabel("Area chart"))
-        area_inner.addWidget(self.area_plot)
-        area_layout.addWidget(area_card)
+        self.area_table.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+        configure_adaptive_row_height(
+            self.area_table, default_visible_rows=3, enforce_minimum=False
+        )
+
+        area_section = ChartTableSection(
+            self.area_plot,
+            self.area_table,
+            chart_title="Area chart",
+            table_title="Area table",
+            parent=area_page,
+            top_stretch=4,
+            bottom_stretch=1,
+            initial_sizes=[780, 180],
+            top_ratio=0.80,
+        )
+        area_layout.addWidget(area_section, 1)
         self.tabs.addTab(area_page, "Area")
 
-        # --- Leakage ---
+        # --- Leakage: table-only (no plot drawn by main_window) — give stretch room ---
         leak_page = QWidget()
         leak_layout = QVBoxLayout(leak_page)
         leak_layout.setContentsMargins(8, 8, 8, 8)
+        leak_layout.setSpacing(8)
+
         leak_card = SimpleCardWidget(leak_page)
         leak_inner = QVBoxLayout(leak_card)
+        leak_inner.setContentsMargins(12, 12, 12, 12)
+        leak_inner.setSpacing(8)
+        leak_inner.addWidget(StrongBodyLabel("Leakage power"))
         self.leak_table = TableWidget(leak_card)
         self.leak_table.setColumnCount(5)
         self.leak_table.setHorizontalHeaderLabels(["Library", "Cell", "When", "PG", "Value"])
         self.leak_table.horizontalHeader().setStretchLastSection(True)
-        leak_inner.addWidget(StrongBodyLabel("Leakage power"))
-        leak_inner.addWidget(self.leak_table)
-        leak_layout.addWidget(leak_card)
+        self.leak_table.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+        self.leak_table.setMinimumHeight(120)
+        leak_inner.addWidget(self.leak_table, 1)
+        leak_layout.addWidget(leak_card, 1)
         self.tabs.addTab(leak_page, "Leakage")
 
-        # --- Timing LUT ---
+        # --- Timing LUT: controls → plot stack TOP / lut_table BOTTOM ---
         lut_page = QWidget()
         lut_layout = QVBoxLayout(lut_page)
         lut_layout.setContentsMargins(8, 8, 8, 8)
-        lut_card = SimpleCardWidget(lut_page)
-        lut_inner = QVBoxLayout(lut_card)
+        lut_layout.setSpacing(8)
 
+        ctrl_card = SimpleCardWidget(lut_page)
+        ctrl_inner = QVBoxLayout(ctrl_card)
+        ctrl_inner.setContentsMargins(12, 10, 12, 10)
+        ctrl_inner.setSpacing(6)
         controls = QGridLayout()
+        controls.setHorizontalSpacing(10)
+        controls.setVerticalSpacing(6)
         controls.addWidget(BodyLabel("Pin"), 0, 0)
-        self.lut_pin = ComboBox(lut_card)
+        self.lut_pin = ComboBox(ctrl_card)
         controls.addWidget(self.lut_pin, 0, 1)
         controls.addWidget(BodyLabel("Table type"), 0, 2)
-        self.lut_table_type = ComboBox(lut_card)
+        self.lut_table_type = ComboBox(ctrl_card)
         controls.addWidget(self.lut_table_type, 0, 3)
         self.refresh_lut_btn = PrimaryPushButton("Refresh LUT")
         controls.addWidget(self.refresh_lut_btn, 0, 4)
         controls.setColumnStretch(1, 1)
         controls.setColumnStretch(3, 1)
-        lut_inner.addLayout(controls)
+        ctrl_inner.addLayout(controls)
+        lut_layout.addWidget(ctrl_card)
 
-        self.lut_table = TableWidget(lut_card)
+        self.lut_plot = PlotCanvas(lut_page)
+        self.lut_plot.setMinimumHeight(160)
+        self.lut_plot.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+        self.lut_delta_plot = PlotCanvas(lut_page)
+        self.lut_delta_plot.setMinimumHeight(160)
+        self.lut_delta_plot.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+
+        lut_plot_pane = labeled_pane("LUT surface / heatmap", self.lut_plot, min_height=160)
+        lut_delta_pane = labeled_pane("LUT Δ heatmap (when 2 libs)", self.lut_delta_plot, min_height=160)
+        plot_stack = make_h_splitter(lut_plot_pane, lut_delta_pane, left_stretch=1, right_stretch=1)
+        plot_stack.setMinimumHeight(160)
+
+        self.lut_table = TableWidget(lut_page)
         self.lut_table.setColumnCount(4)
         self.lut_table.setHorizontalHeaderLabels(["Library", "Cell", "Table", "Max sample"])
         self.lut_table.horizontalHeader().setStretchLastSection(True)
-        configure_adaptive_row_height(self.lut_table, default_visible_rows=6)
+        configure_adaptive_row_height(
+            self.lut_table, default_visible_rows=3, enforce_minimum=False
+        )
         self.lut_table.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
-        self.lut_plot = PlotCanvas(lut_card)
-        self.lut_plot.setMinimumHeight(240)
-        # optional Δ heatmap when two libs selected
-        self.lut_delta_plot = PlotCanvas(lut_card)
-        self.lut_delta_plot.setMinimumHeight(200)
-        lut_inner.addWidget(self.lut_table, 1)
-        lut_inner.addWidget(StrongBodyLabel("LUT surface / heatmap"))
-        lut_inner.addWidget(self.lut_plot)
-        lut_inner.addWidget(StrongBodyLabel("LUT Δ heatmap (when 2 libs)"))
-        lut_inner.addWidget(self.lut_delta_plot)
-        lut_layout.addWidget(lut_card)
+
+        table_pane = labeled_pane("LUT samples", self.lut_table, min_height=64)
+        lut_split = make_v_splitter(
+            plot_stack,
+            table_pane,
+            top_stretch=4,
+            bottom_stretch=1,
+            initial_sizes=[780, 180],
+            top_min=160,
+            bottom_min=64,
+        )
+        lut_layout.addWidget(lut_split, 1)
         self.tabs.addTab(lut_page, "Timing LUT")
 
         root.addWidget(self.tabs, 1)
 
 
 class TimingQAPage(QWidget):
-    """时序QA / Timing QA — Qualib / Liberate-LV inspired (Liberty only)."""
+    """时序QA / Timing QA — chart-first vertical split (Liberty only)."""
 
     def __init__(self, parent=None):
         super().__init__(parent=parent)
@@ -294,13 +343,49 @@ class TimingQAPage(QWidget):
 
         root.addWidget(ctrl_card)
 
-        # --- results splitter: table | plots ---
-        split = QSplitter(Qt.Horizontal)
-        split.setChildrenCollapsible(False)
+        # --- charts TOP as tabs (Δ / Curves / LUTs) / arc_table BOTTOM ---
+        charts_tabs = TabWidget()
+
+        self.delta_plot = PlotCanvas()
+        self.delta_plot.setMinimumHeight(160)
+        self.delta_plot.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+        delta_page = QWidget()
+        delta_l = QVBoxLayout(delta_page)
+        delta_l.setContentsMargins(4, 4, 4, 4)
+        delta_l.addWidget(self.delta_plot, 1)
+        charts_tabs.addTab(delta_page, "Δ heatmap")
+
+        self.curve_plot = PlotCanvas()
+        self.curve_plot.setMinimumHeight(160)
+        self.curve_plot.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+        curve_page = QWidget()
+        curve_l = QVBoxLayout(curve_page)
+        curve_l.setContentsMargins(4, 4, 4, 4)
+        curve_l.addWidget(self.curve_plot, 1)
+        charts_tabs.addTab(curve_page, "Curves")
+
+        self.left_lut_plot = PlotCanvas()
+        self.right_lut_plot = PlotCanvas()
+        self.left_lut_plot.setMinimumHeight(140)
+        self.right_lut_plot.setMinimumHeight(140)
+        self.left_lut_plot.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+        self.right_lut_plot.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+        left_pane = labeled_pane("Left LUT", self.left_lut_plot, min_height=140)
+        right_pane = labeled_pane("Right LUT", self.right_lut_plot, min_height=140)
+        lut_h = make_h_splitter(left_pane, right_pane, left_stretch=1, right_stretch=1)
+        lut_page = QWidget()
+        lut_l = QVBoxLayout(lut_page)
+        lut_l.setContentsMargins(4, 4, 4, 4)
+        lut_l.addWidget(lut_h, 1)
+        charts_tabs.addTab(lut_page, "LUTs")
+
+        charts_tabs.setMinimumHeight(160)
+        charts_tabs.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
 
         table_card = SimpleCardWidget()
         table_l = QVBoxLayout(table_card)
         table_l.setContentsMargins(12, 12, 12, 12)
+        table_l.setSpacing(8)
         table_l.addWidget(StrongBodyLabel("Arcs / results"))
         self.arc_table = TableWidget(table_card)
         self.arc_table.setColumnCount(8)
@@ -308,38 +393,169 @@ class TimingQAPage(QWidget):
             ["Status", "Cell", "Pin", "Related", "Table", "max_abs", "max_rel", "Index"]
         )
         self.arc_table.horizontalHeader().setStretchLastSection(True)
-        configure_adaptive_row_height(self.arc_table, default_visible_rows=6)
+        configure_adaptive_row_height(
+            self.arc_table, default_visible_rows=3, enforce_minimum=False
+        )
         self.arc_table.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         self.arc_table.setSelectionBehavior(self.arc_table.SelectRows)
         self.arc_table.setSelectionMode(self.arc_table.SingleSelection)
-        table_l.addWidget(self.arc_table)
-        split.addWidget(table_card)
+        table_l.addWidget(self.arc_table, 1)
 
-        plots_card = SimpleCardWidget()
-        plots_l = QVBoxLayout(plots_card)
-        plots_l.setContentsMargins(12, 12, 12, 12)
-        plots_l.addWidget(StrongBodyLabel("Δ heatmap"))
-        self.delta_plot = PlotCanvas(plots_card)
-        self.delta_plot.setMinimumHeight(180)
-        plots_l.addWidget(self.delta_plot)
-        plots_l.addWidget(StrongBodyLabel("Delay curves (left vs right)"))
-        self.curve_plot = PlotCanvas(plots_card)
-        self.curve_plot.setMinimumHeight(160)
-        plots_l.addWidget(self.curve_plot)
-        plots_l.addWidget(StrongBodyLabel("Left / Right LUT"))
-        lut_row = QHBoxLayout()
-        self.left_lut_plot = PlotCanvas(plots_card)
-        self.right_lut_plot = PlotCanvas(plots_card)
-        self.left_lut_plot.setMinimumHeight(140)
-        self.right_lut_plot.setMinimumHeight(140)
-        lut_row.addWidget(self.left_lut_plot)
-        lut_row.addWidget(self.right_lut_plot)
-        plots_l.addLayout(lut_row)
-        split.addWidget(plots_card)
+        results_split = make_v_splitter(
+            charts_tabs,
+            table_card,
+            top_stretch=4,
+            bottom_stretch=1,
+            initial_sizes=[780, 180],
+            top_min=160,
+            bottom_min=64,
+        )
+        root.addWidget(results_split, 1)
 
-        split.setStretchFactor(0, 3)
-        split.setStretchFactor(1, 4)
-        root.addWidget(split, 1)
+
+class PPAPage(QWidget):
+    """Stdcell PPA compare — chart-first tabs (Dashboard / Area / Timing / Data)."""
+
+    def __init__(self, parent=None):
+        super().__init__(parent=parent)
+        self.setObjectName("ppaPage")
+        self.last_report = None
+        self.last_html_path = ""
+        self._build()
+
+    def _build(self):
+        root = QVBoxLayout(self)
+        root.setContentsMargins(24, 24, 24, 24)
+        root.setSpacing(12)
+
+        root.addWidget(TitleLabel("PPA / 功耗面积时序"))
+        root.addWidget(
+            CaptionLabel(
+                "Stdcell PPA vs baseline · Area / Leakage / typical delay · "
+                "series-aware charts · one-page HTML · SRAM mode stub later"
+            )
+        )
+
+        ctrl_card = ElevatedCardWidget(self)
+        ctrl = QVBoxLayout(ctrl_card)
+        ctrl.setContentsMargins(16, 16, 16, 16)
+        ctrl.setSpacing(10)
+
+        form = QGridLayout()
+        form.setHorizontalSpacing(10)
+        form.setVerticalSpacing(8)
+
+        form.addWidget(BodyLabel("Baseline (left)"), 0, 0)
+        self.left_lib = ComboBox(ctrl_card)
+        form.addWidget(self.left_lib, 0, 1)
+
+        form.addWidget(BodyLabel("Compare (right)"), 0, 2)
+        self.right_lib = ComboBox(ctrl_card)
+        form.addWidget(self.right_lib, 0, 3)
+
+        form.addWidget(BodyLabel("Cell filter"), 1, 0)
+        self.cell_filter = SearchLineEdit(ctrl_card)
+        self.cell_filter.setPlaceholderText("fnmatch e.g. INV*")
+        self.cell_filter.setClearButtonEnabled(True)
+        form.addWidget(self.cell_filter, 1, 1)
+
+        form.addWidget(BodyLabel("Mode"), 1, 2)
+        self.mode_combo = ComboBox(ctrl_card)
+        self.mode_combo.addItems(["stdcell", "sram (stub)"])
+        form.addWidget(self.mode_combo, 1, 3)
+
+        form.addWidget(BodyLabel("Notes"), 2, 0)
+        self.notes_edit = LineEdit(ctrl_card)
+        self.notes_edit.setPlaceholderText("Optional cover notes for HTML report")
+        form.addWidget(self.notes_edit, 2, 1, 1, 3)
+
+        form.setColumnStretch(1, 1)
+        form.setColumnStretch(3, 1)
+        ctrl.addLayout(form)
+
+        btns = QHBoxLayout()
+        self.run_btn = PrimaryPushButton("Run PPA")
+        self.export_html_btn = PushButton("Export HTML")
+        self.export_csv_btn = PushButton("Export CSV")
+        self.export_json_btn = PushButton("Export JSON")
+        btns.addWidget(self.run_btn)
+        btns.addWidget(self.export_html_btn)
+        btns.addWidget(self.export_csv_btn)
+        btns.addWidget(self.export_json_btn)
+        btns.addStretch(1)
+        self.summary_label = CaptionLabel("Not run yet")
+        btns.addWidget(self.summary_label)
+        ctrl.addLayout(btns)
+        self.report_path_label = CaptionLabel("")
+        ctrl.addWidget(self.report_path_label)
+        root.addWidget(ctrl_card)
+
+        # Chart-first tabs: Dashboard / Area / Timing / Data
+        self.tabs = TabWidget(self)
+
+        # Dashboard — radar + KPI summary
+        dash_page = QWidget()
+        dash_l = QVBoxLayout(dash_page)
+        dash_l.setContentsMargins(8, 8, 8, 8)
+        dash_l.setSpacing(8)
+        kpi_card = SimpleCardWidget(dash_page)
+        kpi_inner = QVBoxLayout(kpi_card)
+        kpi_inner.setContentsMargins(12, 10, 12, 10)
+        kpi_inner.setSpacing(4)
+        kpi_inner.addWidget(StrongBodyLabel("Summary"))
+        self.kpi_label = CaptionLabel("Run PPA to populate radar and KPIs.")
+        kpi_inner.addWidget(self.kpi_label)
+        dash_l.addWidget(kpi_card)
+        self.radar_plot = PlotCanvas(dash_page)
+        self.radar_plot.setMinimumHeight(200)
+        self.radar_plot.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+        dash_l.addWidget(wrap_card("PPA radar", self.radar_plot), 1)
+        self.tabs.addTab(dash_page, "Dashboard")
+
+        # Area — series bars dominate
+        area_page = QWidget()
+        area_l = QVBoxLayout(area_page)
+        area_l.setContentsMargins(8, 8, 8, 8)
+        self.area_plot = PlotCanvas(area_page)
+        self.area_plot.setMinimumHeight(200)
+        self.area_plot.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+        area_l.addWidget(wrap_card("Area / Leakage by drive", self.area_plot), 1)
+        self.tabs.addTab(area_page, "Area")
+
+        # Timing — delay overlay
+        timing_page = QWidget()
+        timing_l = QVBoxLayout(timing_page)
+        timing_l.setContentsMargins(8, 8, 8, 8)
+        self.delay_plot = PlotCanvas(timing_page)
+        self.delay_plot.setMinimumHeight(200)
+        self.delay_plot.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+        timing_l.addWidget(wrap_card("Delay vs load overlay", self.delay_plot), 1)
+        self.tabs.addTab(timing_page, "Timing")
+
+        # Data — full metrics table
+        data_page = QWidget()
+        data_l = QVBoxLayout(data_page)
+        data_l.setContentsMargins(8, 8, 8, 8)
+        data_card = SimpleCardWidget(data_page)
+        data_inner = QVBoxLayout(data_card)
+        data_inner.setContentsMargins(12, 12, 12, 12)
+        data_inner.setSpacing(8)
+        data_inner.addWidget(StrongBodyLabel("PPA table (baseline / %Δ)"))
+        self.ppa_table = TableWidget(data_card)
+        self.ppa_table.setColumnCount(8)
+        self.ppa_table.setHorizontalHeaderLabels(
+            ["Cell", "Family", "Area %", "Leak %", "Delay %", "Area abs", "Leak abs", "Delay abs"]
+        )
+        self.ppa_table.horizontalHeader().setStretchLastSection(True)
+        configure_adaptive_row_height(
+            self.ppa_table, default_visible_rows=3, enforce_minimum=False
+        )
+        self.ppa_table.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+        data_inner.addWidget(self.ppa_table, 1)
+        data_l.addWidget(data_card, 1)
+        self.tabs.addTab(data_page, "Data")
+
+        root.addWidget(self.tabs, 1)
 
 
 class AboutPage(QWidget):
@@ -372,6 +588,7 @@ class AboutPage(QWidget):
             CaptionLabel(
                 "Load multiple .lib files · filter cells · compare area, leakage, and timing LUTs.\n"
                 "Timing QA: NLDM Δ matrices, missing arcs, thresholds (no SPICE).\n"
+                "PPA: stdcell Area/Leakage/typical-delay vs baseline (SRAM later).\n"
                 "UI: PyQt-Fluent-Widgets · Theme: AUTO (follows system light/dark).\n"
                 "Parser and compare logic are unchanged from the CLI."
             )
