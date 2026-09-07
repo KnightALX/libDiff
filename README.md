@@ -3,7 +3,7 @@
 Liberty (`.lib`) **compare / analysis / Timing QA** for chip **FIP** design teams -
 stdcell and SRAM libraries (NLDM and CCS-style tables).
 
-**Version: 0.5.0**
+**Version: 0.6.0**
 
 Built for FIP library bring-up and corner QA. Parser and GUI ideas draw from
 [libView](https://github.com/liyanqing1987/libView) and
@@ -26,6 +26,7 @@ and batch Timing QA reports.
 - **Stdcell PPA** (Phase A): baseline-normalized Area / Leakage / typical delay, series charts, one-page HTML
 - **Fluent GUI** (PyQt-Fluent-Widgets): Libraries / Compare / Timing QA / PPA / About
 - Unified **matplotlib** plot theme (bar / heatmap / delay curves)
+- **LUT plot freedom (0.6.0)**: user-driven Point/Line/Surface on physical index_1/index_2; quantile_index 33点 defaults; marginal_delta_stats; mouse-wheel scrolls Fluent pages (canvas ignores wheel unless Ctrl).
 - **LUT index compare**: physical probe / 1D·2D classify / cross-index bilinear resample (union·intersection·left_grid); template `lu_table_template` resolve
 - Timing LUT and arc tables default to about **6** visible rows and grow with window height
 - Folder discover / analyze (for example Pharosc `synopsys/*.lib`)
@@ -83,7 +84,7 @@ Or double-click `run_libDiff.bat` / `scripts\run_libDiff.bat`
 ## GUI
 
 - **Libraries** - load file or open folder, fnmatch filter, async load, progress + InfoBar
-- **Compare** - Area / Leakage / Timing LUT tabs with matplotlib plots; Timing LUT adds Positional|Cross-index mode, index pickers, Probe KPI, 1D slice curves
+- **Compare** — Area / Leakage / Timing LUT tabs (chart-first). Timing LUT view modes: 单点 Point / 扫线 Line / 扫面 Surface; defaults to 33-point indices; Surface shows Δ heatmap + marginals; Cross-index vs Positional; page-level scroll + PlotCanvas wheel passthrough.
 - **Timing QA** - single or batch run, arc table, delta heatmap / curves, export CSV / HTML / JSON
 - **PPA** - stdcell Area/Leakage/typical-delay vs baseline, series charts, export HTML / CSV / JSON (SRAM mode is stub-only for a later phase)
 - **About** - version and scope notes

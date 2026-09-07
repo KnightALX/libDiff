@@ -561,6 +561,305 @@ def probe_points(
     return out
 
 
+
+
+def quantile_index(index_vals: Sequence[float], q: float = 0.33) -> float:
+    """Physical value at fraction ``q`` along an ordered index vector.
+
+    Interpolates linearly between surrounding knots. ``q=0.33`` is the
+    GUI default 「33点」. Empty vector returns 0.0; single knot returns that knot.
+    ``q`` is clamped to [0, 1].
+    """
+    xs = [float(x) for x in (index_vals or [])]
+    if not xs:
+        return 0.0
+    if len(xs) == 1:
+        return xs[0]
+    qq = max(0.0, min(1.0, float(q)))
+    pos = qq * (len(xs) - 1)
+    i0 = int(math.floor(pos))
+    i1 = min(i0 + 1, len(xs) - 1)
+    t = pos - i0
+    return xs[i0] * (1.0 - t) + xs[i1] * t
+
+
+def marginal_delta_stats(
+    abs_or_signed_matrix: Matrix,
+    index_1: Sequence[float],
+    index_2: Sequence[float],
+) -> Dict[str, Any]:
+    """Collapse a Δ matrix to marginal mean / max(|·|) curves.
+
+    Returns::
+        {
+          "by_i1": {"xs": [...], "mean": [...], "maxabs": [...], "mean_abs": [...]},
+          "by_i2": {"xs": [...], "mean": [...], "maxabs": [...], "mean_abs": [...]},
+        }
+
+    ``mean`` is mean of signed values (None cells skipped).
+    ``mean_abs`` is mean(|Δ|); ``maxabs`` is max(|Δ|).
+    """
+    i1 = [float(x) for x in (index_1 or [])]
+    i2 = [float(x) for x in (index_2 or [])]
+    mat = abs_or_signed_matrix or []
+
+    def _row_stats(row: Sequence[Optional[float]]) -> Tuple[Optional[float], Optional[float], Optional[float]]:
+        vals = []
+        for v in row:
+            if v is None:
+                continue
+            try:
+                f = float(v)
+            except (TypeError, ValueError):
+                continue
+            if math.isnan(f) or math.isinf(f):
+                continue
+            vals.append(f)
+        if not vals:
+            return None, None, None
+        mean_s = sum(vals) / len(vals)
+        abs_vals = [abs(v) for v in vals]
+        return mean_s, sum(abs_vals) / len(abs_vals), max(abs_vals)
+
+    by_i1_mean: List[Optional[float]] = []
+    by_i1_mean_abs: List[Optional[float]] = []
+    by_i1_max: List[Optional[float]] = []
+    xs_i1: List[float] = []
+    for i, x in enumerate(i1):
+        row = mat[i] if i < len(mat) else []
+        # If 1-col matrix without index_2, still collapse that single col
+        if not i2 and row and not isinstance(row, (list, tuple)):
+            row = [row]
+        m, ma, mx = _row_stats(list(row) if row is not None else [])
+        xs_i1.append(float(x))
+        by_i1_mean.append(m)
+        by_i1_mean_abs.append(ma)
+        by_i1_max.append(mx)
+
+    by_i2_mean: List[Optional[float]] = []
+    by_i2_mean_abs: List[Optional[float]] = []
+    by_i2_max: List[Optional[float]] = []
+    xs_i2: List[float] = []
+    ncols = len(i2) if i2 else (max((len(r) for r in mat), default=0) if mat else 0)
+    for j in range(ncols):
+        col: List[Optional[float]] = []
+        for i in range(len(mat)):
+            row = mat[i]
+            if j < len(row):
+                col.append(row[j])
+            else:
+                col.append(None)
+        m, ma, mx = _row_stats(col)
+        xs_i2.append(float(i2[j]) if j < len(i2) else float(j))
+        by_i2_mean.append(m)
+        by_i2_mean_abs.append(ma)
+        by_i2_max.append(mx)
+
+    return {
+        "by_i1": {
+            "xs": xs_i1,
+            "mean": by_i1_mean,
+            "mean_abs": by_i1_mean_abs,
+            "maxabs": by_i1_max,
+        },
+        "by_i2": {
+            "xs": xs_i2,
+            "mean": by_i2_mean,
+            "mean_abs": by_i2_mean_abs,
+            "maxabs": by_i2_max,
+        },
+    }
+
+
+def lut_view_payload(
+    left_table: TableLike,
+    right_table: Optional[TableLike] = None,
+    *,
+    view_mode: str = "point",
+    line_fix_axis: str = "index_1",
+    x1: Optional[float] = None,
+    x2: Optional[float] = None,
+    cross_mode: str = "left_grid",
+    use_cross: bool = True,
+    left_lib: Any = None,
+    right_lib: Any = None,
+    denser: int = 0,
+) -> Dict[str, Any]:
+    """GUI-less payload for Point / Line / Surface Timing-LUT views.
+
+    view_mode: 'point' | 'line' | 'surface'
+    line_fix_axis: which axis is fixed when view_mode=='line' ('index_1' or 'index_2').
+    denser: if >0 on Line, resample free axis to that many points (inclusive endpoints).
+    """
+    mode = (view_mode or "point").lower()
+    if mode in ("单点", "point", "probe"):
+        mode = "point"
+    elif mode in ("扫线", "line", "slice"):
+        mode = "line"
+    elif mode in ("扫面", "surface", "heatmap", "full"):
+        mode = "surface"
+    else:
+        mode = "point"
+
+    li1, li2, ltname, lv1, lv2 = resolve_indices(left_lib, left_table)
+    cls = classify_lut(left_table)
+    if x1 is None:
+        x1 = quantile_index(li1, 0.33) if li1 else 0.0
+    if x2 is None and li2:
+        x2 = quantile_index(li2, 0.33)
+
+    out: Dict[str, Any] = {
+        "view_mode": mode,
+        "classification": cls,
+        "template": ltname,
+        "variables": {"variable_1": lv1, "variable_2": lv2},
+        "x1": x1,
+        "x2": x2,
+        "index_1": list(li1),
+        "index_2": list(li2),
+    }
+
+    if mode == "point":
+        lv = sample_lut(left_table.get("values") or [], li1, li2, float(x1), float(x2) if cls == "2d" and x2 is not None else None)
+        rv = None
+        if right_table is not None:
+            ri1, ri2, _, _, _ = resolve_indices(right_lib, right_table)
+            rcls = classify_lut(right_table)
+            rv = sample_lut(
+                right_table.get("values") or [],
+                ri1,
+                ri2,
+                float(x1),
+                float(x2) if rcls == "2d" and x2 is not None else None,
+            )
+        delta = None if lv is None or rv is None else (rv - lv)
+        pct = None
+        if delta is not None and lv not in (None, 0):
+            pct = delta / lv
+        out["point"] = {"left": lv, "right": rv, "delta": delta, "pct": pct}
+        return out
+
+    if mode == "line":
+        fix_axis = (line_fix_axis or "index_1").lower()
+        if "index_2" in fix_axis or fix_axis.endswith("2"):
+            free_axis = "index_1"
+            fixed_value = float(x2) if x2 is not None else quantile_index(li2, 0.33)
+            fixed_axis = "index_2"
+        else:
+            free_axis = "index_2" if cls == "2d" and li2 else "index_1"
+            fixed_value = float(x1) if x1 is not None else quantile_index(li1, 0.33)
+            fixed_axis = "index_1"
+            if cls == "1d":
+                free_axis = "index_1"
+                fixed_axis = "none"
+                fixed_value = None
+
+        xs_l, ys_l = slice_curve(
+            left_table,
+            axis=free_axis if cls == "2d" else "index_1",
+            fixed_value=fixed_value,
+            method="interp",
+            lib=left_lib,
+        )
+        if denser and denser > 1 and len(xs_l) >= 2:
+            lo, hi = float(xs_l[0]), float(xs_l[-1])
+            xs_dense = [lo + (hi - lo) * k / (denser - 1) for k in range(denser)]
+            vals = left_table.get("values") or []
+            ys_dense: List[Optional[float]] = []
+            for xv in xs_dense:
+                if free_axis == "index_2":
+                    ys_dense.append(sample_lut(vals, li1, li2, float(fixed_value), float(xv)))
+                else:
+                    ys_dense.append(sample_lut(vals, li1, li2, float(xv), float(fixed_value) if fixed_value is not None else None))
+            xs_l, ys_l = xs_dense, ys_dense
+
+        series: Dict[str, List[Optional[float]]] = {"left": ys_l}
+        ys_r: Optional[List[Optional[float]]] = None
+        if right_table is not None:
+            xs_r, ys_r = slice_curve(
+                right_table,
+                axis=free_axis if classify_lut(right_table) == "2d" else "index_1",
+                fixed_value=fixed_value,
+                method="interp",
+                lib=right_lib,
+            )
+            # resample right onto left xs when lengths differ
+            if denser and denser > 1:
+                ri1, ri2, _, _, _ = resolve_indices(right_lib, right_table)
+                rvals = right_table.get("values") or []
+                ys_r = []
+                for xv in xs_l:
+                    if free_axis == "index_2":
+                        ys_r.append(sample_lut(rvals, ri1, ri2, float(fixed_value), float(xv)))
+                    else:
+                        ys_r.append(sample_lut(rvals, ri1, ri2, float(xv), float(fixed_value) if fixed_value is not None else None))
+            series["right"] = ys_r
+            delta_y: List[Optional[float]] = []
+            for a, b in zip(ys_l, ys_r or []):
+                if a is None or b is None:
+                    delta_y.append(None)
+                else:
+                    delta_y.append(b - a)
+            series["delta"] = delta_y
+        out["line"] = {
+            "xs": xs_l,
+            "series": series,
+            "free_axis": free_axis,
+            "fixed_axis": fixed_axis,
+            "fixed_value": fixed_value,
+        }
+        return out
+
+    # surface
+    if right_table is not None and use_cross:
+        dm = cross_index_delta(
+            left_table, right_table, mode=cross_mode, left_lib=left_lib, right_lib=right_lib
+        )
+        marg = marginal_delta_stats(dm["abs_matrix"], dm["index_1"], dm["index_2"])
+        out["surface"] = {
+            "values_left": dm["values_left"],
+            "values_right": dm["values_right"],
+            "abs_matrix": dm["abs_matrix"],
+            "index_1": dm["index_1"],
+            "index_2": dm["index_2"],
+            "marginals": marg,
+            "stats": dm.get("stats"),
+            "cross_mode": cross_mode,
+        }
+    else:
+        marg = None
+        abs_m = None
+        if right_table is not None:
+            lv = left_table.get("values") or []
+            rv = right_table.get("values") or []
+            abs_m = []
+            for i, row in enumerate(lv):
+                arow: List[Optional[float]] = []
+                rrow = rv[i] if i < len(rv) else []
+                for j, a in enumerate(row):
+                    b = rrow[j] if j < len(rrow) else None
+                    if a is None or b is None:
+                        arow.append(None)
+                    else:
+                        try:
+                            arow.append(float(b) - float(a))
+                        except (TypeError, ValueError):
+                            arow.append(None)
+                abs_m.append(arow)
+            marg = marginal_delta_stats(abs_m, li1, li2)
+        out["surface"] = {
+            "values_left": left_table.get("values") or [],
+            "values_right": (right_table.get("values") if right_table else None),
+            "abs_matrix": abs_m,
+            "index_1": list(li1),
+            "index_2": list(li2),
+            "marginals": marg,
+            "stats": None,
+            "cross_mode": "positional" if not use_cross else cross_mode,
+        }
+    return out
+
+
 __all__ = [
     "classify_lut",
     "resolve_indices",
@@ -569,4 +868,7 @@ __all__ = [
     "cross_index_delta",
     "slice_curve",
     "probe_points",
+    "quantile_index",
+    "marginal_delta_stats",
+    "lut_view_payload",
 ]

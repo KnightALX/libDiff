@@ -95,3 +95,23 @@ Physical-index LUT compare for stdcell NLDM tables (Zhihu / Liberty practice):
   1D/2D badge + template/variable labels. Timing QA shows alignment/mode/oor status.
 
 Never compare only by matrix cell [i][j] when physical indices differ.
+
+
+## 0.6.0 — LUT plot freedom + scroll fix (2026-09-08 Asia/Shanghai)
+
+User-driven Timing LUT views on Compare page:
+
+- **单点 Point** — pick index_1 (and index_2 for 2D); KPI bar for left/right/Δ/%; defaults to **33点** via quantile_index(..., q=0.33).
+- **扫线 Line** — fix one axis (33点 default on fixed axis), scan the other; overlay left/right/Δ curves. 1D LUTs scan index_1 only.
+- **扫面 Surface** — 2D only; left heatmap + Δ heatmap + lut_marginal_plot (mean(|Δ|) / max(|Δ|) vs each index). Helpers: marginal_delta_stats, lut_view_payload.
+- Cross-index vs Positional preserved; badge shows 1D/2D + template + vars + mode.
+- **Scroll**: major Fluent pages wrapped in QScrollArea; PlotCanvas.wheelEvent ignores wheel unless Ctrl (zoom). Tables still scroll internally.
+
+Verify:
+
+`at
+cd D:\workspace\project\grok\libDiff
+C:\Users\USER\anaconda3\python.exe -m pytest -q
+C:\Users\USER\anaconda3\python.exe -m libdiff gui tests\fixtures\lut_mismatch_left.lib tests\fixtures\lut_mismatch_right.lib
+`
+

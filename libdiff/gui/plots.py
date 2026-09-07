@@ -87,6 +87,18 @@ class PlotCanvas(FigureCanvasQTAgg):
             self.setParent(parent)
         self._style_axes_defaults()
 
+    def wheelEvent(self, event):  # noqa: N802
+        """Ignore wheel so parent QScrollArea scrolls; Ctrl+wheel keeps matplotlib zoom."""
+        try:
+            from PyQt5.QtCore import Qt
+            mods = event.modifiers()
+            if mods & Qt.ControlModifier:
+                return super().wheelEvent(event)
+        except Exception:
+            pass
+        event.ignore()
+
+
     def _style_axes_defaults(self) -> None:
         self.figure.patch.set_facecolor("#F7F8FA")
         self.figure.patch.set_alpha(1.0)
@@ -361,6 +373,66 @@ class PlotCanvas(FigureCanvasQTAgg):
         ax.legend(loc="best", frameon=True)
         self._cleanup_spines(ax)
         self._finish(ax)
+
+    def draw_marginals(
+        self,
+        by_i1: Optional[Dict[str, Any]] = None,
+        by_i2: Optional[Dict[str, Any]] = None,
+        title: str = "Marginal |Δ|",
+        use_abs_mean: bool = True,
+    ):
+        """Plot mean(|Δ|)/mean(Δ) and max(|Δ|) vs index_1 and index_2 (two subplots)."""
+        self.figure.clear()
+        if not by_i1 and not by_i2:
+            self.draw_empty("No marginals")
+            return
+        n = 0
+        if by_i1 and by_i1.get("xs"):
+            n += 1
+        if by_i2 and by_i2.get("xs"):
+            n += 1
+        if n == 0:
+            self.draw_empty("No marginals")
+            return
+        axes = self.figure.subplots(1, n) if n > 1 else [self.figure.add_subplot(111)]
+        if n == 1:
+            axes = [axes] if not isinstance(axes, (list, tuple)) else axes
+        idx = 0
+        for label, block, xlabel in (
+            ("vs index_1", by_i1, "index_1"),
+            ("vs index_2", by_i2, "index_2"),
+        ):
+            if not block or not block.get("xs"):
+                continue
+            ax = axes[idx]
+            idx += 1
+            xs = [float(x) for x in block["xs"]]
+            mean_key = "mean_abs" if use_abs_mean else "mean"
+            mean_ys = block.get(mean_key) or block.get("mean_abs") or block.get("mean") or []
+            max_ys = block.get("maxabs") or []
+            xm, ym, xx, yx = [], [], [], []
+            for x, y in zip(xs, mean_ys):
+                if y is None:
+                    continue
+                xm.append(x)
+                ym.append(float(y))
+            for x, y in zip(xs, max_ys):
+                if y is None:
+                    continue
+                xx.append(x)
+                yx.append(float(y))
+            if xm:
+                ax.plot(xm, ym, marker="o", linewidth=1.8, markersize=4, color=_CB_COLORS[0], label="mean(|Δ|)" if use_abs_mean else "mean(Δ)")
+            if xx:
+                ax.plot(xx, yx, marker="s", linewidth=1.4, markersize=4, color=_CB_COLORS[1], label="max(|Δ|)")
+            ax.set_title("%s · %s" % (title, label), fontsize=10)
+            ax.set_xlabel(xlabel)
+            ax.set_ylabel("|Δ|")
+            ax.grid(True, alpha=0.45)
+            ax.set_axisbelow(True)
+            ax.legend(loc="best", frameon=True)
+            self._cleanup_spines(ax)
+        self._finish()
 
     def draw_lut_surface(self, index_1, index_2, values, title: str = ""):
         """Prefer 2D heatmap; optional 3D only for tiny grids (<= 6x6)."""

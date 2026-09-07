@@ -5,6 +5,7 @@ from __future__ import annotations
 from PyQt5.QtWidgets import (
     QGridLayout,
     QHBoxLayout,
+    QScrollArea,
     QSizePolicy,
     QVBoxLayout,
     QWidget,
@@ -41,6 +42,7 @@ from libdiff.gui.layout_utils import (
     make_h_splitter,
     make_v_splitter,
     wrap_card,
+    wrap_in_scroll_area,
 )
 from libdiff.gui.plots import PlotCanvas
 from libdiff.gui.table_utils import configure_adaptive_row_height
@@ -56,7 +58,11 @@ class LibrariesPage(QWidget):
         self._build()
 
     def _build(self):
-        root = QVBoxLayout(self)
+        outer = QVBoxLayout(self)
+        outer.setContentsMargins(0, 0, 0, 0)
+        outer.setSpacing(0)
+        body = QWidget(self)
+        root = QVBoxLayout(body)
         root.setContentsMargins(24, 24, 24, 24)
         root.setSpacing(12)
 
@@ -101,6 +107,7 @@ class LibrariesPage(QWidget):
         card_layout.addWidget(hint)
 
         root.addWidget(card, 1)
+        outer.addWidget(wrap_in_scroll_area(body), 1)
 
 
 class ComparePage(QWidget):
@@ -112,7 +119,11 @@ class ComparePage(QWidget):
         self._build()
 
     def _build(self):
-        root = QVBoxLayout(self)
+        outer = QVBoxLayout(self)
+        outer.setContentsMargins(0, 0, 0, 0)
+        outer.setSpacing(0)
+        body = QWidget(self)
+        root = QVBoxLayout(body)
         root.setContentsMargins(24, 24, 24, 24)
         root.setSpacing(12)
 
@@ -186,46 +197,83 @@ class ComparePage(QWidget):
         ctrl_card = SimpleCardWidget(lut_page)
         ctrl_inner = QVBoxLayout(ctrl_card)
         ctrl_inner.setContentsMargins(12, 10, 12, 10)
-        ctrl_inner.setSpacing(6)
-        controls = QGridLayout()
-        controls.setHorizontalSpacing(10)
-        controls.setVerticalSpacing(6)
-        controls.addWidget(BodyLabel("Pin"), 0, 0)
-        self.lut_pin = ComboBox(ctrl_card)
-        controls.addWidget(self.lut_pin, 0, 1)
-        controls.addWidget(BodyLabel("Table type"), 0, 2)
-        self.lut_table_type = ComboBox(ctrl_card)
-        controls.addWidget(self.lut_table_type, 0, 3)
-        self.refresh_lut_btn = PrimaryPushButton("Refresh LUT")
-        controls.addWidget(self.refresh_lut_btn, 0, 4)
+        ctrl_inner.setSpacing(8)
 
-        controls.addWidget(BodyLabel("Mode / 模式"), 1, 0)
+        # Row1: Pin, Table type, Refresh
+        row1 = QGridLayout()
+        row1.setHorizontalSpacing(10)
+        row1.setVerticalSpacing(6)
+        row1.addWidget(BodyLabel("Pin"), 0, 0)
+        self.lut_pin = ComboBox(ctrl_card)
+        row1.addWidget(self.lut_pin, 0, 1)
+        row1.addWidget(BodyLabel("Table type"), 0, 2)
+        self.lut_table_type = ComboBox(ctrl_card)
+        row1.addWidget(self.lut_table_type, 0, 3)
+        self.refresh_lut_btn = PrimaryPushButton("Apply / 应用")
+        row1.addWidget(self.refresh_lut_btn, 0, 4)
+        row1.setColumnStretch(1, 1)
+        row1.setColumnStretch(3, 1)
+        ctrl_inner.addLayout(row1)
+
+        # Row2: Badge, View mode, Cross mode
+        row2 = QGridLayout()
+        row2.setHorizontalSpacing(10)
+        row2.setVerticalSpacing(6)
+        self.lut_badge = CaptionLabel("LUT: —")
+        row2.addWidget(self.lut_badge, 0, 0, 1, 2)
+        row2.addWidget(BodyLabel("View / 视图"), 0, 2)
+        self.lut_view_mode = ComboBox(ctrl_card)
+        self.lut_view_mode.addItems(["单点 Point", "扫线 Line", "扫面 Surface"])
+        row2.addWidget(self.lut_view_mode, 0, 3)
+        row2.addWidget(BodyLabel("Cross / 对齐"), 0, 4)
         self.lut_index_mode = ComboBox(ctrl_card)
         self.lut_index_mode.addItems(["Cross-index (physical)", "Positional"])
-        controls.addWidget(self.lut_index_mode, 1, 1)
-        controls.addWidget(BodyLabel("Cross grid"), 1, 2)
+        row2.addWidget(self.lut_index_mode, 0, 5)
         self.lut_cross_mode = ComboBox(ctrl_card)
         self.lut_cross_mode.addItems(["left_grid", "union", "intersection"])
-        controls.addWidget(self.lut_cross_mode, 1, 3)
+        row2.addWidget(self.lut_cross_mode, 0, 6)
+        row2.setColumnStretch(1, 1)
+        row2.setColumnStretch(3, 1)
+        ctrl_inner.addLayout(row2)
 
-        controls.addWidget(BodyLabel("Index_1 (slew)"), 2, 0)
+        # Row3: Index pickers + line-fix axis (enable/disable by mode)
+        row3 = QGridLayout()
+        row3.setHorizontalSpacing(10)
+        row3.setVerticalSpacing(6)
+        self.lut_i1_label = BodyLabel("Index_1 (slew)")
+        row3.addWidget(self.lut_i1_label, 0, 0)
         self.lut_i1 = ComboBox(ctrl_card)
         self.lut_i1.setMinimumWidth(100)
-        controls.addWidget(self.lut_i1, 2, 1)
+        row3.addWidget(self.lut_i1, 0, 1)
         self.lut_i1_custom = LineEdit(ctrl_card)
-        self.lut_i1_custom.setPlaceholderText("custom i1 float")
-        controls.addWidget(self.lut_i1_custom, 2, 2)
-        controls.addWidget(BodyLabel("Index_2 (load)"), 2, 3)
-        i2_row = QHBoxLayout()
+        self.lut_i1_custom.setPlaceholderText("默认 33点 / custom i1")
+        row3.addWidget(self.lut_i1_custom, 0, 2)
+
+        self.lut_i2_label = BodyLabel("Index_2 (load)")
+        row3.addWidget(self.lut_i2_label, 0, 3)
         self.lut_i2 = ComboBox(ctrl_card)
         self.lut_i2.setMinimumWidth(90)
-        i2_row.addWidget(self.lut_i2)
+        row3.addWidget(self.lut_i2, 0, 4)
         self.lut_i2_custom = LineEdit(ctrl_card)
-        self.lut_i2_custom.setPlaceholderText("custom i2")
-        i2_row.addWidget(self.lut_i2_custom)
-        controls.addLayout(i2_row, 2, 4)
+        self.lut_i2_custom.setPlaceholderText("默认 33点 / custom i2")
+        row3.addWidget(self.lut_i2_custom, 0, 5)
+        row3.setColumnStretch(1, 1)
+        row3.setColumnStretch(4, 1)
+        ctrl_inner.addLayout(row3)
 
-        controls.addWidget(BodyLabel("Slice / 切片"), 3, 0)
+        row3b = QHBoxLayout()
+        row3b.addWidget(BodyLabel("Line scan / 扫线轴"))
+        self.lut_line_fix = ComboBox(ctrl_card)
+        self.lut_line_fix.addItems(
+            [
+                "固定 Index_1 扫 Index_2",
+                "固定 Index_2 扫 Index_1",
+            ]
+        )
+        self.lut_line_fix.setMinimumWidth(220)
+        row3b.addWidget(self.lut_line_fix)
+        row3b.addStretch(1)
+        # Keep legacy lut_slice hidden for attr compatibility (synced from view mode)
         self.lut_slice = ComboBox(ctrl_card)
         self.lut_slice.addItems(
             [
@@ -234,30 +282,40 @@ class ComparePage(QWidget):
                 "Fix index_2 → curve vs slew",
             ]
         )
-        controls.addWidget(self.lut_slice, 3, 1)
-        self.lut_probe_btn = PrimaryPushButton("Probe")
-        controls.addWidget(self.lut_probe_btn, 3, 2)
-        self.lut_badge = CaptionLabel("LUT: —")
-        controls.addWidget(self.lut_badge, 3, 3, 1, 2)
+        self.lut_slice.setVisible(False)
+        row3b.addWidget(self.lut_slice)
+        self.lut_probe_btn = PrimaryPushButton("Probe / 探针")
+        row3b.addWidget(self.lut_probe_btn)
+        ctrl_inner.addLayout(row3b)
 
-        controls.setColumnStretch(1, 1)
-        controls.setColumnStretch(3, 1)
-        ctrl_inner.addLayout(controls)
-        self.lut_probe_caption = CaptionLabel("Probe: select index_1/index_2 then Probe")
+        self.lut_probe_caption = CaptionLabel(
+            "Point: pick i1/i2 (default 33点) · Line: fix one axis · Surface: heatmap + marginals"
+        )
         ctrl_inner.addWidget(self.lut_probe_caption)
         lut_layout.addWidget(ctrl_card)
 
         self.lut_plot = PlotCanvas(lut_page)
-        self.lut_plot.setMinimumHeight(160)
+        self.lut_plot.setMinimumHeight(220)
         self.lut_plot.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         self.lut_delta_plot = PlotCanvas(lut_page)
-        self.lut_delta_plot.setMinimumHeight(160)
+        self.lut_delta_plot.setMinimumHeight(220)
         self.lut_delta_plot.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+        self.lut_marginal_plot = PlotCanvas(lut_page)
+        self.lut_marginal_plot.setMinimumHeight(180)
+        self.lut_marginal_plot.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
 
-        lut_plot_pane = labeled_pane("LUT surface / heatmap", self.lut_plot, min_height=160)
-        lut_delta_pane = labeled_pane("LUT Δ heatmap (when 2 libs)", self.lut_delta_plot, min_height=160)
+        lut_plot_pane = labeled_pane("LUT / left · Line overlay", self.lut_plot, min_height=220)
+        lut_delta_pane = labeled_pane("Δ / right heatmap", self.lut_delta_plot, min_height=220)
         plot_stack = make_h_splitter(lut_plot_pane, lut_delta_pane, left_stretch=1, right_stretch=1)
-        plot_stack.setMinimumHeight(160)
+        plot_stack.setMinimumHeight(220)
+
+        marg_pane = labeled_pane("Marginals · mean(|Δ|) / max(|Δ|)", self.lut_marginal_plot, min_height=180)
+        plot_column = QWidget(lut_page)
+        plot_col_l = QVBoxLayout(plot_column)
+        plot_col_l.setContentsMargins(0, 0, 0, 0)
+        plot_col_l.setSpacing(6)
+        plot_col_l.addWidget(plot_stack, 3)
+        plot_col_l.addWidget(marg_pane, 2)
 
         self.lut_table = TableWidget(lut_page)
         self.lut_table.setColumnCount(4)
@@ -270,18 +328,19 @@ class ComparePage(QWidget):
 
         table_pane = labeled_pane("LUT samples", self.lut_table, min_height=64)
         lut_split = make_v_splitter(
-            plot_stack,
+            plot_column,
             table_pane,
             top_stretch=4,
             bottom_stretch=1,
-            initial_sizes=[780, 180],
-            top_min=160,
+            initial_sizes=[820, 160],
+            top_min=280,
             bottom_min=64,
         )
         lut_layout.addWidget(lut_split, 1)
         self.tabs.addTab(lut_page, "Timing LUT")
 
         root.addWidget(self.tabs, 1)
+        outer.addWidget(wrap_in_scroll_area(body), 1)
 
 
 class TimingQAPage(QWidget):
@@ -294,7 +353,11 @@ class TimingQAPage(QWidget):
         self._build()
 
     def _build(self):
-        root = QVBoxLayout(self)
+        outer = QVBoxLayout(self)
+        outer.setContentsMargins(0, 0, 0, 0)
+        outer.setSpacing(0)
+        body = QWidget(self)
+        root = QVBoxLayout(body)
         root.setContentsMargins(24, 24, 24, 24)
         root.setSpacing(12)
 
@@ -399,7 +462,7 @@ class TimingQAPage(QWidget):
         delta_l = QVBoxLayout(delta_page)
         delta_l.setContentsMargins(4, 4, 4, 4)
         delta_l.addWidget(self.delta_plot, 1)
-        charts_tabs.addTab(delta_page, "Δ heatmap")
+        charts_tabs.addTab(delta_page, "扫面 Δ heatmap")
 
         self.curve_plot = PlotCanvas()
         self.curve_plot.setMinimumHeight(160)
@@ -408,7 +471,7 @@ class TimingQAPage(QWidget):
         curve_l = QVBoxLayout(curve_page)
         curve_l.setContentsMargins(4, 4, 4, 4)
         curve_l.addWidget(self.curve_plot, 1)
-        charts_tabs.addTab(curve_page, "Curves")
+        charts_tabs.addTab(curve_page, "扫线 Curves")
 
         self.left_lut_plot = PlotCanvas()
         self.right_lut_plot = PlotCanvas()
@@ -457,6 +520,7 @@ class TimingQAPage(QWidget):
             bottom_min=64,
         )
         root.addWidget(results_split, 1)
+        outer.addWidget(wrap_in_scroll_area(body), 1)
 
 
 class PPAPage(QWidget):
@@ -470,7 +534,11 @@ class PPAPage(QWidget):
         self._build()
 
     def _build(self):
-        root = QVBoxLayout(self)
+        outer = QVBoxLayout(self)
+        outer.setContentsMargins(0, 0, 0, 0)
+        outer.setSpacing(0)
+        body = QWidget(self)
+        root = QVBoxLayout(body)
         root.setContentsMargins(24, 24, 24, 24)
         root.setSpacing(12)
 
@@ -602,6 +670,7 @@ class PPAPage(QWidget):
         self.tabs.addTab(data_page, "Data")
 
         root.addWidget(self.tabs, 1)
+        outer.addWidget(wrap_in_scroll_area(body), 1)
 
 
 class AboutPage(QWidget):
@@ -613,7 +682,11 @@ class AboutPage(QWidget):
         self._build()
 
     def _build(self):
-        root = QVBoxLayout(self)
+        outer = QVBoxLayout(self)
+        outer.setContentsMargins(0, 0, 0, 0)
+        outer.setSpacing(0)
+        body = QWidget(self)
+        root = QVBoxLayout(body)
         root.setContentsMargins(24, 24, 24, 24)
         root.setSpacing(12)
 
@@ -641,3 +714,4 @@ class AboutPage(QWidget):
         )
         root.addWidget(card)
         root.addStretch(1)
+        outer.addWidget(wrap_in_scroll_area(body), 1)

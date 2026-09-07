@@ -1,6 +1,6 @@
 """libDiff - Liberty (.lib) compare/analysis for FIP stdcell/SRAM work."""
 
-__version__ = "0.5.0"
+__version__ = "0.6.0"
 
 from libdiff.errors import LibDiffError, ParseError, UnitConflictError
 
