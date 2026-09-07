@@ -139,14 +139,30 @@ class CellView:
                 }
                 for ttype, tdata in (timing.get("table_type") or {}).items():
                     canon = OCV_SPELLING_FIX.get(ttype, ttype)
+                    index_1 = _parse_index(tdata.get("index_1"))
+                    index_2 = _parse_index(tdata.get("index_2"))
+                    template_name = tdata.get("template_name") or None
+                    variable_1 = None
+                    variable_2 = None
+                    if (not index_1 or not index_2) and template_name:
+                        tmpl = self.library.lut_templates().get(str(template_name)) or {}
+                        if not index_1:
+                            index_1 = list(tmpl.get("index_1") or [])
+                        if not index_2:
+                            index_2 = list(tmpl.get("index_2") or [])
+                        variable_1 = tmpl.get("variable_1")
+                        variable_2 = tmpl.get("variable_2")
                     tables.append(
                         {
                             **related,
                             "table_type": canon,
                             "original_table_type": ttype,
                             "known": canon in KNOWN_TIMING_TABLES,
-                            "index_1": _parse_index(tdata.get("index_1")),
-                            "index_2": _parse_index(tdata.get("index_2")),
+                            "template_name": template_name,
+                            "variable_1": variable_1,
+                            "variable_2": variable_2,
+                            "index_1": index_1,
+                            "index_2": index_2,
                             "values": _parse_values(tdata.get("values")),
                         }
                     )
@@ -163,6 +179,7 @@ class Library:
         self.parser = parser or LibertyParser(self.path, use_cache=True)
         self._cells: Optional[List[str]] = None
         self._units: Optional[Dict[str, str]] = None
+        self._lut_templates: Optional[Dict[str, Dict[str, Any]]] = None
 
     @property
     def key(self) -> str:
@@ -192,6 +209,34 @@ class Library:
             # still allow view; accessors return None/N/A
             pass
         return CellView(self, name)
+
+    def lut_templates(self) -> Dict[str, Dict[str, Any]]:
+        """Return lu_table_template / power_lut_template dict keyed by name.
+
+        Each entry: {variable_1, variable_2, index_1, index_2}.
+        Cached after first call. Backward compatible — empty dict if none.
+        """
+        if getattr(self, "_lut_templates", None) is not None:
+            return dict(self._lut_templates)
+        out: Dict[str, Dict[str, Any]] = {}
+        groups = (self.parser.libDic or {}).get("group") or []
+        for g in groups:
+            gtype = g.get("type")
+            if gtype not in ("lu_table_template", "power_lut_template"):
+                continue
+            name = g.get("name")
+            if not name:
+                continue
+            entry = {
+                "template_type": gtype,
+                "variable_1": _strip_quotes(g.get("variable_1")) if "variable_1" in g else None,
+                "variable_2": _strip_quotes(g.get("variable_2")) if "variable_2" in g else None,
+                "index_1": _parse_index(g.get("index_1")),
+                "index_2": _parse_index(g.get("index_2")),
+            }
+            out[str(name)] = entry
+        self._lut_templates = out
+        return dict(out)
 
     def get(self, attr: str, default=None):
         """Dict-like safe get for units/meta."""

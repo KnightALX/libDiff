@@ -13,6 +13,7 @@ import math
 from typing import Any, Dict, List, Optional, Sequence, Tuple, Union
 
 from libdiff.model.library import Library, load_library, NA, KNOWN_TIMING_TABLES
+from libdiff.compare.lut_index import cross_index_delta, resolve_indices
 
 # NLDM / constraint table types we fully matrix-diff
 NLDM_TABLE_TYPES = frozenset(
@@ -364,8 +365,16 @@ def timing_qa(
     rel_tol: float = 0.01,
     include_matrices: bool = True,
     run_single_lib_qa: bool = False,
+    index_mode: Optional[str] = None,
+    cross_mode: str = "left_grid",
 ) -> Dict[str, Any]:
-    """Compare timing arcs between two libraries; return structured QA report."""
+    """Compare timing arcs between two libraries; return structured QA report.
+
+    index_mode:
+      - None / "auto": positional when indices align, else cross-index resample
+      - "positional": matrix cell [i][j] compare (fast; legacy)
+      - "cross": always resample onto a shared physical grid (see cross_mode)
+    """
     left_lib = left if isinstance(left, Library) else load_library(left)
     right_lib = right if isinstance(right, Library) else load_library(right)
 
@@ -393,45 +402,81 @@ def timing_qa(
             left_only.append(meta)
             continue
 
-        align = index_alignment_status(
-            lt.get("index_1") or [],
-            lt.get("index_2") or [],
-            rt.get("index_1") or [],
-            rt.get("index_2") or [],
-        )
+        # Resolve template indices so alignment uses physical coords when possible
+        li1, li2, _, _, _ = resolve_indices(left_lib, lt)
+        ri1, ri2, _, _, _ = resolve_indices(right_lib, rt)
+        # Prefer resolved indices on the table copies used below
+        lt_res = dict(lt)
+        rt_res = dict(rt)
+        lt_res["index_1"], lt_res["index_2"] = li1, li2
+        rt_res["index_1"], rt_res["index_2"] = ri1, ri2
+
+        align = index_alignment_status(li1, li2, ri1, ri2)
         if align != "aligned":
             n_index_mismatch += 1
 
-        dm = delta_matrices(lt.get("values") or [], rt.get("values") or [])
-        stats = dm["stats"]
+        mode_eff = (index_mode or "auto").lower()
+        if mode_eff in ("auto", "", "none"):
+            use_cross = align != "aligned"
+        elif mode_eff == "cross":
+            use_cross = True
+        else:
+            use_cross = False
+
+        if use_cross:
+            dm = cross_index_delta(
+                lt_res,
+                rt_res,
+                mode=cross_mode or "left_grid",
+                left_lib=left_lib,
+                right_lib=right_lib,
+            )
+            stats = dm["stats"]
+            # map n_mismatch-ish field
+            stats = dict(stats)
+            stats.setdefault("n_mismatch", stats.get("n_none", 0))
+        else:
+            dm = delta_matrices(lt.get("values") or [], rt.get("values") or [])
+            stats = dm["stats"]
+
         fail = _exceeds_threshold(stats["max_abs"], stats["max_rel"], abs_tol, rel_tol)
         if fail:
             n_fail += 1
         status = "fail" if fail else "ok"
-        if align != "aligned":
+        if align != "aligned" and not use_cross:
             status = "index_mismatch" if status == "ok" else status
 
         entry: Dict[str, Any] = {
             **meta,
             "status": status,
             "index_alignment": align,
+            "index_mode_used": "cross" if use_cross else "positional",
+            "cross_mode": (cross_mode if use_cross else None),
             "max_abs": stats["max_abs"],
             "max_rel": stats["max_rel"],
             "mean_abs": stats["mean_abs"],
             "rms": stats["rms"],
-            "n_mismatch": stats["n_mismatch"],
+            "n_mismatch": stats.get("n_mismatch"),
             "n_compared": stats["n_compared"],
             "exceeds_tol": fail,
-            "index_1_left": list(lt.get("index_1") or []),
-            "index_2_left": list(lt.get("index_2") or []),
-            "index_1_right": list(rt.get("index_1") or []),
-            "index_2_right": list(rt.get("index_2") or []),
+            "index_1_left": list(li1),
+            "index_2_left": list(li2),
+            "index_1_right": list(ri1),
+            "index_2_right": list(ri2),
         }
+        if use_cross:
+            entry["out_of_range"] = dm.get("out_of_range")
+            entry["grid_index_1"] = dm.get("index_1")
+            entry["grid_index_2"] = dm.get("index_2")
         if include_matrices:
             entry["abs_matrix"] = dm["abs_matrix"]
             entry["rel_matrix"] = dm["rel_matrix"]
-            entry["values_left"] = lt.get("values") or []
-            entry["values_right"] = rt.get("values") or []
+            if use_cross:
+                entry["values_left"] = dm.get("values_left") or []
+                entry["values_right"] = dm.get("values_right") or []
+            else:
+                entry["values_left"] = lt.get("values") or []
+                entry["values_right"] = rt.get("values") or []
         matched.append(entry)
 
     summary = {

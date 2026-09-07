@@ -43,6 +43,14 @@ from libdiff.compare.timing_qa import (
     export_timing_qa_batch_csv,
     export_timing_qa_html,
 )
+from libdiff.compare.lut_index import (
+    classify_lut,
+    cross_index_delta,
+    probe_points,
+    resolve_indices,
+    sample_lut,
+    slice_curve,
+)
 
 from libdiff.series import DEFAULT_SERIES_PATTERNS, sort_cells_with_size
 
@@ -97,6 +105,12 @@ class MainWindow(FluentWindow):
         page.filter_edit.returnPressed.connect(self._apply_filter)
         page.tree.itemChanged.connect(self._on_tree_changed)
         self.comparePage.refresh_lut_btn.clicked.connect(self._refresh_lut)
+        self.comparePage.lut_probe_btn.clicked.connect(self._probe_lut)
+        self.comparePage.lut_index_mode.currentIndexChanged.connect(lambda _i: self._refresh_lut())
+        self.comparePage.lut_cross_mode.currentIndexChanged.connect(lambda _i: self._refresh_lut())
+        self.comparePage.lut_slice.currentIndexChanged.connect(lambda _i: self._refresh_lut())
+        self.comparePage.lut_i1.currentIndexChanged.connect(lambda _i: None)
+        self.comparePage.lut_i2.currentIndexChanged.connect(lambda _i: None)
 
         tq = self.timingQaPage
         tq.run_btn.clicked.connect(self._run_timing_qa)
@@ -317,6 +331,44 @@ class MainWindow(FluentWindow):
         cp.lut_table_type.blockSignals(False)
         self._refresh_lut()
 
+
+    def _lut_selected_float(self, combo, custom_edit):
+        """Prefer custom LineEdit float; else combo text."""
+        txt = (custom_edit.text() or "").strip()
+        if txt:
+            try:
+                return float(txt)
+            except ValueError:
+                pass
+        cur = (combo.currentText() or "").strip()
+        if not cur:
+            return None
+        try:
+            return float(cur)
+        except ValueError:
+            return None
+
+    def _populate_lut_index_combos(self, tables):
+        cp = self.comparePage
+        i1s, i2s = set(), set()
+        for _lk, _cell, t in tables:
+            a, b, _, _, _ = resolve_indices(self.libs.get(_lk), t)
+            for x in a:
+                i1s.add(float(x))
+            for x in b:
+                i2s.add(float(x))
+        def _refill(combo, values):
+            cur = combo.currentText()
+            combo.blockSignals(True)
+            combo.clear()
+            items = ["%.6g" % v for v in sorted(values)]
+            combo.addItems(items or [""])
+            if cur in items:
+                combo.setCurrentText(cur)
+            combo.blockSignals(False)
+        _refill(cp.lut_i1, i1s)
+        _refill(cp.lut_i2, i2s)
+
     def _refresh_lut(self):
         selected = self._selected_cells()
         cp = self.comparePage
@@ -343,36 +395,159 @@ class MainWindow(FluentWindow):
                 )
                 matched_tables.append((lib_key, cell, t))
 
+        self._last_lut_tables = matched_tables
+        self._populate_lut_index_combos(matched_tables)
+
+        mode_txt = cp.lut_index_mode.currentText() if hasattr(cp, "lut_index_mode") else ""
+        use_cross = "Cross" in mode_txt or "physical" in mode_txt.lower()
+        slice_txt = cp.lut_slice.currentText() if hasattr(cp, "lut_slice") else "Full heatmap"
+        cross_mode = cp.lut_cross_mode.currentText() if hasattr(cp, "lut_cross_mode") else "left_grid"
+
+        # Badge
         if matched_tables:
-            last = matched_tables[-1][2]
-            cp.lut_plot.draw_lut_heatmap(
-                last["values"],
-                index_1=last.get("index_1"),
-                index_2=last.get("index_2"),
-                title=want_tt or "LUT",
+            lk, _c, t0 = matched_tables[0]
+            cls = classify_lut(t0)
+            i1, i2, tname, v1, v2 = resolve_indices(self.libs[lk], t0)
+            cp.lut_badge.setText(
+                "LUT: %s | tmpl=%s | %s / %s"
+                % (cls.upper(), tname or "—", v1 or "index_1", v2 or ("index_2" if i2 else "—"))
             )
         else:
-            cp.lut_plot.draw_empty()
+            cp.lut_badge.setText("LUT: —")
 
-        # Δ heatmap when exactly two selections with same pin/table
+        # Primary plot: heatmap or slice curve
+        if not matched_tables:
+            cp.lut_plot.draw_empty()
+            cp.lut_delta_plot.draw_empty("Need 2 libs/cells for Δ")
+            return
+
+        lk0, _c0, last = matched_tables[-1]
+        fix_i1 = self._lut_selected_float(cp.lut_i1, cp.lut_i1_custom)
+        fix_i2 = self._lut_selected_float(cp.lut_i2, cp.lut_i2_custom)
+
+        if "curve vs load" in slice_txt:
+            fixed = fix_i1 if fix_i1 is not None else (last.get("index_1") or [0])[0]
+            xs, ys = slice_curve(last, axis="index_2", fixed_value=fixed, method="interp", lib=self.libs[lk0])
+            series = {"LUT": ys}
+            if len(matched_tables) >= 2:
+                lk1, _c1, t1 = matched_tables[0]
+                xs2, ys2 = slice_curve(t1, axis="index_2", fixed_value=fixed, method="interp", lib=self.libs[lk1])
+                # align xs to union labels for overlay — use first xs
+                series = {
+                    self.libs[matched_tables[0][0]].display_name: ys2,
+                    self.libs[matched_tables[-1][0]].display_name: ys,
+                }
+                xs = xs2 if len(xs2) >= len(xs) else xs
+            cp.lut_plot.draw_delay_curves(
+                xs, series, title="vs load @ i1=%s" % fixed, xlabel="index_2 (load)", ylabel=want_tt or "value"
+            )
+        elif "curve vs slew" in slice_txt:
+            fixed = fix_i2 if fix_i2 is not None else ((last.get("index_2") or [0])[0] if last.get("index_2") else 0)
+            xs, ys = slice_curve(last, axis="index_1", fixed_value=fixed, method="interp", lib=self.libs[lk0])
+            series = {"LUT": ys}
+            if len(matched_tables) >= 2:
+                lk1, _c1, t1 = matched_tables[0]
+                xs2, ys2 = slice_curve(t1, axis="index_1", fixed_value=fixed, method="interp", lib=self.libs[lk1])
+                series = {
+                    self.libs[matched_tables[0][0]].display_name: ys2,
+                    self.libs[matched_tables[-1][0]].display_name: ys,
+                }
+                xs = xs2 if len(xs2) >= len(xs) else xs
+            cp.lut_plot.draw_delay_curves(
+                xs, series, title="vs slew @ i2=%s" % fixed, xlabel="index_1 (slew)", ylabel=want_tt or "value"
+            )
+        else:
+            i1, i2, _, _, _ = resolve_indices(self.libs[lk0], last)
+            cp.lut_plot.draw_lut_heatmap(
+                last["values"],
+                index_1=i1,
+                index_2=i2,
+                title=want_tt or "LUT",
+            )
+
+        # Delta plot when >= 2 selections
         if len(matched_tables) >= 2:
             t0 = matched_tables[0][2]
             t1 = matched_tables[1][2]
-            dm = delta_matrices(t0.get("values") or [], t1.get("values") or [])
-            cp.lut_delta_plot.draw_heatmap(
-                dm["abs_matrix"],
-                xlabels=t0.get("index_2") or t1.get("index_2"),
-                ylabels=t0.get("index_1") or t1.get("index_1"),
-                title="Δ (%s − %s)"
-                % (
-                    self.libs[matched_tables[1][0]].display_name,
-                    self.libs[matched_tables[0][0]].display_name,
-                ),
-                cmap="RdBu_r",
-                center=0,
-            )
+            lib0 = self.libs[matched_tables[0][0]]
+            lib1 = self.libs[matched_tables[1][0]]
+            if use_cross:
+                dm = cross_index_delta(t0, t1, mode=cross_mode, left_lib=lib0, right_lib=lib1)
+                cp.lut_delta_plot.draw_heatmap(
+                    dm["abs_matrix"],
+                    xlabels=dm.get("index_2") or None,
+                    ylabels=dm.get("index_1") or None,
+                    title="Δ cross (%s) %s − %s"
+                    % (
+                        cross_mode,
+                        lib1.display_name,
+                        lib0.display_name,
+                    ),
+                    cmap="RdBu_r",
+                    center=0,
+                )
+            else:
+                dm = delta_matrices(t0.get("values") or [], t1.get("values") or [])
+                i1, i2, _, _, _ = resolve_indices(lib0, t0)
+                cp.lut_delta_plot.draw_heatmap(
+                    dm["abs_matrix"],
+                    xlabels=i2 or t1.get("index_2"),
+                    ylabels=i1 or t1.get("index_1"),
+                    title="Δ positional (%s − %s)" % (lib1.display_name, lib0.display_name),
+                    cmap="RdBu_r",
+                    center=0,
+                )
         else:
             cp.lut_delta_plot.draw_empty("Need 2 libs/cells for Δ")
+
+    def _probe_lut(self):
+        cp = self.comparePage
+        tables = getattr(self, "_last_lut_tables", None) or []
+        if not tables:
+            self._refresh_lut()
+            tables = getattr(self, "_last_lut_tables", None) or []
+        if not tables:
+            cp.lut_probe_caption.setText("Probe: no LUT selected")
+            return
+        x1 = self._lut_selected_float(cp.lut_i1, cp.lut_i1_custom)
+        x2 = self._lut_selected_float(cp.lut_i2, cp.lut_i2_custom)
+        if x1 is None:
+            cp.lut_probe_caption.setText("Probe: pick index_1 (slew)")
+            return
+        parts = []
+        left_v = right_v = None
+        for idx, (lk, cell, t) in enumerate(tables[:2]):
+            lib = self.libs[lk]
+            i1, i2, _, _, _ = resolve_indices(lib, t)
+            # 1D may not need x2
+            cls = classify_lut(t)
+            xx2 = x2 if cls == "2d" else x2
+            val = sample_lut(t.get("values") or [], i1, i2, x1, xx2 if cls == "2d" else None)
+            if cls == "2d" and x2 is None and i2:
+                # default nearest first load if not specified
+                val = sample_lut(t.get("values") or [], i1, i2, x1, float(i2[0]))
+                xx2 = float(i2[0])
+            label = lib.display_name
+            parts.append("%s=%s" % (label, val))
+            if idx == 0:
+                left_v = val
+            elif idx == 1:
+                right_v = val
+        delta_txt = ""
+        if left_v is not None and right_v is not None:
+            d = right_v - left_v
+            pct = None if left_v == 0 else (d / left_v) * 100.0
+            delta_txt = "  Δ=%s  %%Δ=%s" % (
+                ("%.6g" % d),
+                ("—" if pct is None else "%.3g%%" % pct),
+            )
+        elif left_v is None or (len(tables) > 1 and right_v is None):
+            delta_txt = "  (out_of_range)"
+        cp.lut_probe_caption.setText(
+            "Probe @ (i1=%s, i2=%s): %s%s"
+            % (x1, x2, " | ".join(parts), delta_txt)
+        )
+
 
     # --- Timing QA ---
 
@@ -683,6 +858,8 @@ class MainWindow(FluentWindow):
                 abs_tol=float(tq.abs_tol.value()),
                 rel_tol=float(tq.rel_tol.value()),
                 include_matrices=True,
+                index_mode="auto",
+                cross_mode="left_grid",
             )
         except Exception as exc:  # noqa: BLE001
             MessageBox("Timing QA error", str(exc), self).exec()
@@ -779,11 +956,18 @@ class MainWindow(FluentWindow):
             tq.right_lut_plot.draw_empty()
             return
 
+        align = a.get("index_alignment") or "—"
+        mode_used = a.get("index_mode_used") or "—"
+        if hasattr(tq, "index_align_label"):
+            tq.index_align_label.setText(
+                "Index: %s | mode=%s | oor=%s"
+                % (align, mode_used, (a.get("out_of_range") or {}).get("total", 0))
+            )
         abs_m = a.get("abs_matrix") or []
         tq.delta_plot.draw_heatmap(
             abs_m,
-            xlabels=a.get("index_2_left") or a.get("index_2_right"),
-            ylabels=a.get("index_1_left") or a.get("index_1_right"),
+            xlabels=a.get("grid_index_2") or a.get("index_2_left") or a.get("index_2_right"),
+            ylabels=a.get("grid_index_1") or a.get("index_1_left") or a.get("index_1_right"),
             title="Δ %s %s" % (a.get("cell"), a.get("table_type")),
             cmap="RdBu_r",
             center=0,

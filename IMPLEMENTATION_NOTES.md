@@ -77,3 +77,21 @@ python -m libdiff ppa tests/fixtures/stdcell_base.lib tests/fixtures/stdcell_per
 python -m libdiff gui tests/fixtures/stdcell_base.lib tests/fixtures/stdcell_perturbed.lib
 # then open nav item "PPA", select libs, Run PPA
 ```
+
+
+## 0.5.0 — LUT index compare (2026-09-07)
+
+Physical-index LUT compare for stdcell NLDM tables (Zhihu / Liberty practice):
+
+- `libdiff/compare/lut_index.py`: `classify_lut`, `resolve_indices` (inline + `lu_table_template`),
+  `sample_lut` (linear/bilinear, no extrapolate), `resample_to_grid`, `cross_index_delta`
+  (left_grid|union|intersection|query), `slice_curve`, `probe_points`.
+- Library model exposes `lut_templates()` / `power_lut_template`; `CellView.timing_tables()`
+  fills missing index_1/2 from template (e.g. INVX2 → `delay_2x2`).
+- Timing QA `index_mode=auto|positional|cross`: on mismatch auto cross-resamples for Δ.
+- CLI: `python -m libdiff lut-probe LEFT [RIGHT] --cell X --pin Y --table cell_rise --i1 .. --i2 ..`
+  plus `--slice index_2 --fix-i1 ..` and `--cross-mode left_grid`.
+- GUI Compare → Timing LUT: Mode combo, index selectors, Probe caption, Slice → curve plots,
+  1D/2D badge + template/variable labels. Timing QA shows alignment/mode/oor status.
+
+Never compare only by matrix cell [i][j] when physical indices differ.

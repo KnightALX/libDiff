@@ -1,0 +1,53 @@
+library (lut_mismatch_left) {
+  delay_model : table_lookup;
+  time_unit : "1ns";
+  voltage_unit : "1V";
+  capacitive_load_unit (1,pf);
+  leakage_power_unit : "1nW";
+  lu_table_template (delay_2x2) {
+    variable_1 : input_net_transition;
+    variable_2 : total_output_net_capacitance;
+    index_1 ("0.1, 0.5");
+    index_2 ("0.01, 0.1");
+  }
+  lu_table_template (constraint_1x2) {
+    variable_1 : related_pin_transition;
+    index_1 ("0.1, 0.5");
+  }
+  cell (INVX1) {
+    area : 1.0;
+    pin (A) { direction : input; capacitance : 0.01; }
+    pin (Y) {
+      direction : output;
+      function : "!A";
+      timing () {
+        related_pin : "A";
+        timing_sense : negative_unate;
+        cell_rise (delay_2x2) {
+          index_1 ("0.1, 0.5");
+          index_2 ("0.01, 0.1");
+          values ("0.10, 0.20", "0.15, 0.25");
+        }
+        rise_constraint (constraint_1x2) {
+          index_1 ("0.1, 0.5");
+          values ("0.05, 0.08");
+        }
+      }
+    }
+  }
+  cell (INVX2) {
+    area : 2.0;
+    pin (A) { direction : input; }
+    pin (Y) {
+      direction : output;
+      function : "!A";
+      timing () {
+        related_pin : "A";
+        timing_sense : negative_unate;
+        cell_rise (delay_2x2) {
+          values ("0.08, 0.16", "0.12, 0.20");
+        }
+      }
+    }
+  }
+}

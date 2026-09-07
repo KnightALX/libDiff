@@ -31,12 +31,20 @@ from libdiff.compare.timing_qa import (
 from libdiff.discover import discover_libs
 from libdiff.errors import LibDiffError, UnitConflictError
 from libdiff.model.library import load_library
+from libdiff.compare.lut_index import (
+    classify_lut,
+    cross_index_delta,
+    probe_points,
+    resolve_indices,
+    sample_lut,
+    slice_curve,
+)
 
 
 def _build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(
         prog="libdiff",
-        description="libDiff — Liberty (.lib) compare/analysis for FIP stdcell/SRAM teams",
+        description="libDiff - Liberty (.lib) compare/analysis for FIP stdcell/SRAM teams",
     )
     p.add_argument("--version", action="version", version="libDiff %s" % __version__)
     sub = p.add_subparsers(dest="command")
@@ -54,7 +62,7 @@ def _build_parser() -> argparse.ArgumentParser:
     c.add_argument("--allow-unit-conflict", action="store_true",
                    help="Do not block report on unit conflict (numeric deltas omitted)")
     c.add_argument("--timing-qa", action="store_true",
-                   help="Also run Timing QA (NLDM arc Δ / missing / thresholds)")
+                   help="Also run Timing QA (NLDM arc delta / missing / thresholds)")
     c.add_argument("--abs-tol", type=float, default=1e-4, help="Timing QA absolute tolerance")
     c.add_argument("--rel-tol", type=float, default=0.01, help="Timing QA relative tolerance")
 
@@ -70,13 +78,13 @@ def _build_parser() -> argparse.ArgumentParser:
     tq.add_argument("--cells", nargs="*", default=None, help="Exact cell name list")
     tq.add_argument("--table-type", nargs="*", default=None,
                     help="Restrict table types (cell_rise cell_fall ...)")
-    tq.add_argument("--abs-tol", type=float, default=1e-4, help="Absolute Δ tolerance")
-    tq.add_argument("--rel-tol", type=float, default=0.01, help="Relative Δ tolerance")
+    tq.add_argument("--abs-tol", type=float, default=1e-4, help="Absolute delta tolerance")
+    tq.add_argument("--rel-tol", type=float, default=0.01, help="Relative delta tolerance")
     tq.add_argument("--json", dest="json_out", nargs="?", const="-", default=None,
                     help="Write JSON (path or stdout)")
     tq.add_argument("--csv", dest="csv_out", default=None, help="Write CSV report to path")
     tq.add_argument("--no-matrices", action="store_true",
-                    help="Omit full Δ/%% matrices from JSON (smaller)")
+                    help="Omit full delta/%% matrices from JSON (smaller)")
     tq.add_argument("--single-lib-qa", action="store_true",
                     help="Also run monotonicity/negative/empty checks per lib")
     tq.add_argument("--batch", action="store_true",
@@ -132,6 +140,55 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Number of sample cells to print (default 8; use 0 for none)",
     )
     an.add_argument("--json", dest="json_out", action="store_true", help="Emit JSON")
+
+    # lut-probe
+    lp = sub.add_parser(
+        "lut-probe",
+        help="Probe / slice / cross-index compare timing LUTs at physical index values",
+    )
+    lp.add_argument("left", help="Left / baseline .lib path")
+    lp.add_argument("right", nargs="?", default=None, help="Optional right .lib for delta / cross")
+    lp.add_argument("--cell", required=True, help="Cell name")
+    lp.add_argument("--pin", required=True, help="Output pin name")
+    lp.add_argument("--related", default=None, help="Related pin filter (optional)")
+    lp.add_argument(
+        "--table",
+        default="cell_rise",
+        help="Table type: cell_rise|cell_fall|rise_transition|fall_transition|...",
+    )
+    lp.add_argument("--i1", type=float, default=None, help="Physical index_1 (slew) probe value")
+    lp.add_argument("--i2", type=float, default=None, help="Physical index_2 (load) probe value")
+    lp.add_argument(
+        "--slice",
+        dest="slice_axis",
+        choices=["index_1", "index_2"],
+        default=None,
+        help="Slice 2D LUT to 1D curve along free axis",
+    )
+    lp.add_argument("--fix-i1", type=float, default=None, help="Fixed index_1 when --slice index_2")
+    lp.add_argument("--fix-i2", type=float, default=None, help="Fixed index_2 when --slice index_1")
+    lp.add_argument(
+        "--slice-method",
+        choices=["nearest", "interp"],
+        default="interp",
+        help="Slice fix-axis method (default interp)",
+    )
+    lp.add_argument(
+        "--cross-mode",
+        choices=["left_grid", "union", "intersection", "query"],
+        default="left_grid",
+        help="Cross-index grid mode when right lib given (default left_grid)",
+    )
+    lp.add_argument(
+        "--query-i1",
+        default=None,
+        help="Comma-separated query index_1 grid for --cross-mode query",
+    )
+    lp.add_argument(
+        "--query-i2",
+        default=None,
+        help="Comma-separated query index_2 grid for --cross-mode query",
+    )
 
     # gui
     gui = sub.add_parser("gui", help="Launch libDiff GUI")
@@ -332,6 +389,119 @@ def cmd_ppa(args: argparse.Namespace) -> int:
     return 0
 
 
+
+def _find_table(lib, cell: str, pin: str, table: str, related=None):
+    tables = lib.cell(cell).timing_tables()
+    matches = []
+    for t in tables:
+        if t.get("pin") != pin:
+            continue
+        if t.get("table_type") != table:
+            continue
+        if related is not None and str(t.get("related_pin")) != str(related):
+            continue
+        matches.append(t)
+    return matches
+
+
+def _parse_float_list(s):
+    if not s:
+        return None
+    out = []
+    for tok in str(s).replace(";", ",").split(","):
+        tok = tok.strip()
+        if not tok:
+            continue
+        out.append(float(tok))
+    return out
+
+
+def cmd_lut_probe(args: argparse.Namespace) -> int:
+    """Probe / slice / cross-index compare LUTs at physical indices."""
+    left = load_library(args.left)
+    right = load_library(args.right) if args.right else None
+    lt_list = _find_table(left, args.cell, args.pin, args.table, related=args.related)
+    if not lt_list:
+        print(
+            "No left table for cell=%s pin=%s table=%s related=%s"
+            % (args.cell, args.pin, args.table, args.related),
+            file=sys.stderr,
+        )
+        return 2
+    lt = lt_list[0]
+    li1, li2, tname, v1, v2 = resolve_indices(left, lt)
+    cls = classify_lut(lt)
+    print("left :", left.key)
+    print("cell=%s pin=%s table=%s" % (args.cell, args.pin, args.table))
+    print("class=%s template=%s  var1=%s var2=%s" % (cls, tname, v1, v2))
+    print("index_1:", li1)
+    print("index_2:", li2)
+
+    if args.i1 is not None:
+        val = sample_lut(lt.get("values") or [], li1, li2, args.i1, args.i2)
+        print("probe left @ (i1=%s, i2=%s) = %s" % (args.i1, args.i2, val))
+        if right is not None:
+            rt_list = _find_table(right, args.cell, args.pin, args.table, related=args.related)
+            if not rt_list:
+                print("No matching right table", file=sys.stderr)
+                return 2
+            rt = rt_list[0]
+            ri1, ri2, _, _, _ = resolve_indices(right, rt)
+            rval = sample_lut(rt.get("values") or [], ri1, ri2, args.i1, args.i2)
+            print("probe right@ (i1=%s, i2=%s) = %s" % (args.i1, args.i2, rval))
+            if val is not None and rval is not None:
+                d = rval - val
+                pct = None if val == 0 else d / val
+                print("delta abs=%s  rel=%s" % (d, pct))
+            else:
+                print("delta: out_of_range (left=%s right=%s)" % (val, rval))
+
+    if args.slice_axis:
+        fixed = args.fix_i1 if args.slice_axis == "index_2" else args.fix_i2
+        if fixed is None:
+            # default fix to first of the other axis
+            fixed = (li1[0] if li1 else 0.0) if args.slice_axis == "index_2" else (li2[0] if li2 else 0.0)
+        xs, ys = slice_curve(lt, axis=args.slice_axis, fixed_value=fixed, method=args.slice_method, lib=left)
+        print("slice free=%s fixed=%s method=%s" % (args.slice_axis, fixed, args.slice_method))
+        for x, y in zip(xs, ys):
+            print("  %s -> %s" % (x, y))
+
+    if right is not None and (args.i1 is None or args.cross_mode):
+        # Always print cross-index summary when right present
+        rt_list = _find_table(right, args.cell, args.pin, args.table, related=args.related)
+        if rt_list:
+            rt = rt_list[0]
+            qi1 = _parse_float_list(args.query_i1)
+            qi2 = _parse_float_list(args.query_i2)
+            cd = cross_index_delta(
+                lt,
+                rt,
+                mode=args.cross_mode,
+                query_i1=qi1,
+                query_i2=qi2,
+                left_lib=left,
+                right_lib=right,
+            )
+            st = cd["stats"]
+            print("cross-index mode=%s aligned=%s" % (cd["mode"], cd["aligned"]))
+            print(
+                "grid i1=%s i2=%s  max_abs=%s max_rel=%s n_compared=%s oor=%s"
+                % (
+                    cd["index_1"],
+                    cd["index_2"],
+                    st.get("max_abs"),
+                    st.get("max_rel"),
+                    st.get("n_compared"),
+                    cd.get("out_of_range"),
+                )
+            )
+            # print delta matrix compactly
+            print("abs_matrix:")
+            for row in cd["abs_matrix"]:
+                print(" ", row)
+    return 0
+
+
 def cmd_gui(args: argparse.Namespace) -> int:
     from libdiff.gui.main_window import run_gui
     return run_gui(args.libs or [])
@@ -358,6 +528,8 @@ def main(argv: Optional[List[str]] = None) -> int:
             return cmd_analyze(args)
         if args.command == "ppa":
             return cmd_ppa(args)
+        if args.command == "lut-probe":
+            return cmd_lut_probe(args)
         if args.command == "gui":
             return cmd_gui(args)
         parser.print_help()

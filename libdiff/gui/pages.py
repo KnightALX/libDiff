@@ -198,9 +198,53 @@ class ComparePage(QWidget):
         controls.addWidget(self.lut_table_type, 0, 3)
         self.refresh_lut_btn = PrimaryPushButton("Refresh LUT")
         controls.addWidget(self.refresh_lut_btn, 0, 4)
+
+        controls.addWidget(BodyLabel("Mode / 模式"), 1, 0)
+        self.lut_index_mode = ComboBox(ctrl_card)
+        self.lut_index_mode.addItems(["Cross-index (physical)", "Positional"])
+        controls.addWidget(self.lut_index_mode, 1, 1)
+        controls.addWidget(BodyLabel("Cross grid"), 1, 2)
+        self.lut_cross_mode = ComboBox(ctrl_card)
+        self.lut_cross_mode.addItems(["left_grid", "union", "intersection"])
+        controls.addWidget(self.lut_cross_mode, 1, 3)
+
+        controls.addWidget(BodyLabel("Index_1 (slew)"), 2, 0)
+        self.lut_i1 = ComboBox(ctrl_card)
+        self.lut_i1.setMinimumWidth(100)
+        controls.addWidget(self.lut_i1, 2, 1)
+        self.lut_i1_custom = LineEdit(ctrl_card)
+        self.lut_i1_custom.setPlaceholderText("custom i1 float")
+        controls.addWidget(self.lut_i1_custom, 2, 2)
+        controls.addWidget(BodyLabel("Index_2 (load)"), 2, 3)
+        i2_row = QHBoxLayout()
+        self.lut_i2 = ComboBox(ctrl_card)
+        self.lut_i2.setMinimumWidth(90)
+        i2_row.addWidget(self.lut_i2)
+        self.lut_i2_custom = LineEdit(ctrl_card)
+        self.lut_i2_custom.setPlaceholderText("custom i2")
+        i2_row.addWidget(self.lut_i2_custom)
+        controls.addLayout(i2_row, 2, 4)
+
+        controls.addWidget(BodyLabel("Slice / 切片"), 3, 0)
+        self.lut_slice = ComboBox(ctrl_card)
+        self.lut_slice.addItems(
+            [
+                "Full heatmap",
+                "Fix index_1 → curve vs load",
+                "Fix index_2 → curve vs slew",
+            ]
+        )
+        controls.addWidget(self.lut_slice, 3, 1)
+        self.lut_probe_btn = PrimaryPushButton("Probe")
+        controls.addWidget(self.lut_probe_btn, 3, 2)
+        self.lut_badge = CaptionLabel("LUT: —")
+        controls.addWidget(self.lut_badge, 3, 3, 1, 2)
+
         controls.setColumnStretch(1, 1)
         controls.setColumnStretch(3, 1)
         ctrl_inner.addLayout(controls)
+        self.lut_probe_caption = CaptionLabel("Probe: select index_1/index_2 then Probe")
+        ctrl_inner.addWidget(self.lut_probe_caption)
         lut_layout.addWidget(ctrl_card)
 
         self.lut_plot = PlotCanvas(lut_page)
@@ -338,7 +382,9 @@ class TimingQAPage(QWidget):
         btns.addWidget(self.export_json_btn)
         btns.addStretch(1)
         self.summary_label = CaptionLabel("Not run yet")
+        self.index_align_label = CaptionLabel("Index: —")
         btns.addWidget(self.summary_label)
+        btns.addWidget(self.index_align_label)
         ctrl.addLayout(btns)
 
         root.addWidget(ctrl_card)
