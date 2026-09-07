@@ -24,6 +24,16 @@ from libdiff.compare.ppa import (
     cell_leakage_total,
 )
 
+from libdiff.compare.lut_index import (
+    classify_lut,
+    resolve_indices,
+    sample_lut,
+    resample_to_grid,
+    cross_index_delta,
+    slice_curve,
+    probe_points,
+)
+
 __all__ = [
     "compare_libraries",
     "export_json",
@@ -46,4 +56,12 @@ __all__ = [
     "format_ppa_summary",
     "typical_delay",
     "cell_leakage_total",
+
+    "classify_lut",
+    "resolve_indices",
+    "sample_lut",
+    "resample_to_grid",
+    "cross_index_delta",
+    "slice_curve",
+    "probe_points",
 ]

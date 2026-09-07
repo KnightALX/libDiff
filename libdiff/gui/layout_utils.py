@@ -6,7 +6,9 @@ from typing import Optional, Sequence, Tuple
 
 from PyQt5.QtCore import Qt, QTimer
 from PyQt5.QtWidgets import (
+    QFrame,
     QHBoxLayout,
+    QScrollArea,
     QSizePolicy,
     QSplitter,
     QVBoxLayout,
@@ -68,6 +70,31 @@ def apply_split_ratio(
     top = max(1, int(round(total * ratio)))
     bottom = max(1, total - top)
     splitter.setSizes([top, bottom])
+
+
+
+def wrap_in_scroll_area(
+    content: QWidget,
+    *,
+    min_width: int = 0,
+    frame: bool = False,
+) -> QScrollArea:
+    """Page-level scroll area so tall control+plot pages scroll with the mouse wheel.
+
+    PlotCanvas ignores wheel (unless Ctrl) so this area receives scroll events.
+    Tables keep their own internal scrolling when the cursor is over them.
+    """
+    scroll = QScrollArea()
+    scroll.setWidgetResizable(True)
+    scroll.setFrameShape(QFrame.NoFrame if not frame else QFrame.StyledPanel)
+    scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+    scroll.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+    scroll.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+    content.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
+    if min_width > 0:
+        content.setMinimumWidth(int(min_width))
+    scroll.setWidget(content)
+    return scroll
 
 
 def make_v_splitter(

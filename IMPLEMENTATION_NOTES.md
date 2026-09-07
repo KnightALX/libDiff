@@ -77,3 +77,41 @@ python -m libdiff ppa tests/fixtures/stdcell_base.lib tests/fixtures/stdcell_per
 python -m libdiff gui tests/fixtures/stdcell_base.lib tests/fixtures/stdcell_perturbed.lib
 # then open nav item "PPA", select libs, Run PPA
 ```
+
+
+## 0.5.0 — LUT index compare (2026-09-07)
+
+Physical-index LUT compare for stdcell NLDM tables (Zhihu / Liberty practice):
+
+- `libdiff/compare/lut_index.py`: `classify_lut`, `resolve_indices` (inline + `lu_table_template`),
+  `sample_lut` (linear/bilinear, no extrapolate), `resample_to_grid`, `cross_index_delta`
+  (left_grid|union|intersection|query), `slice_curve`, `probe_points`.
+- Library model exposes `lut_templates()` / `power_lut_template`; `CellView.timing_tables()`
+  fills missing index_1/2 from template (e.g. INVX2 → `delay_2x2`).
+- Timing QA `index_mode=auto|positional|cross`: on mismatch auto cross-resamples for Δ.
+- CLI: `python -m libdiff lut-probe LEFT [RIGHT] --cell X --pin Y --table cell_rise --i1 .. --i2 ..`
+  plus `--slice index_2 --fix-i1 ..` and `--cross-mode left_grid`.
+- GUI Compare → Timing LUT: Mode combo, index selectors, Probe caption, Slice → curve plots,
+  1D/2D badge + template/variable labels. Timing QA shows alignment/mode/oor status.
+
+Never compare only by matrix cell [i][j] when physical indices differ.
+
+
+## 0.6.0 — LUT plot freedom + scroll fix (2026-09-08 Asia/Shanghai)
+
+User-driven Timing LUT views on Compare page:
+
+- **单点 Point** — pick index_1 (and index_2 for 2D); KPI bar for left/right/Δ/%; defaults to **33点** via quantile_index(..., q=0.33).
+- **扫线 Line** — fix one axis (33点 default on fixed axis), scan the other; overlay left/right/Δ curves. 1D LUTs scan index_1 only.
+- **扫面 Surface** — 2D only; left heatmap + Δ heatmap + lut_marginal_plot (mean(|Δ|) / max(|Δ|) vs each index). Helpers: marginal_delta_stats, lut_view_payload.
+- Cross-index vs Positional preserved; badge shows 1D/2D + template + vars + mode.
+- **Scroll**: major Fluent pages wrapped in QScrollArea; PlotCanvas.wheelEvent ignores wheel unless Ctrl (zoom). Tables still scroll internally.
+
+Verify:
+
+`at
+cd D:\workspace\project\grok\libDiff
+C:\Users\USER\anaconda3\python.exe -m pytest -q
+C:\Users\USER\anaconda3\python.exe -m libdiff gui tests\fixtures\lut_mismatch_left.lib tests\fixtures\lut_mismatch_right.lib
+`
+
